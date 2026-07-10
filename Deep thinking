@@ -1,17 +1,314 @@
 #!/usr/bin/env python3
-# Deep thinking - simple Python script
+# Deep thinking - AI Morphasis 2.0 Deep Thinking Engine
 
-"""Prints a short message identifying this file.
+"""
+Deep Thinking Engine for AI Morphasis 2.0
+==========================================
+Modules:
+  1. ReasoningChain   - Multi-step chain-of-thought reasoning
+  2. SocraticDialogue - Question-driven self-reflection
+  3. HypothesisEngine - Generate, test, and refine hypotheses
+  4. MetaCognition    - Thinking about thinking (self-monitoring)
+  5. AnalogicalMapper - Find patterns across domains
 
 Originally this file contained the single line:
     ai deepthinking
 
-This script preserves that text by printing it when run.
+This script expands on that concept with a full deep-thinking framework.
 """
+
+import time
+import textwrap
+from typing import List, Optional
+
+
+# ---------------------------------------------------------------------------
+# 1. Reasoning Chain – Chain-of-Thought step tracker
+# ---------------------------------------------------------------------------
+
+class ReasoningChain:
+    """Breaks a problem into explicit reasoning steps and traces the logic."""
+
+    def __init__(self, problem: str):
+        self.problem = problem
+        self.steps: List[str] = []
+        self.conclusion: Optional[str] = None
+
+    def add_step(self, step: str) -> "ReasoningChain":
+        self.steps.append(step)
+        return self  # fluent interface
+
+    def conclude(self, conclusion: str) -> "ReasoningChain":
+        self.conclusion = conclusion
+        return self
+
+    def display(self):
+        print(f"\n{'='*60}")
+        print(f"REASONING CHAIN")
+        print(f"Problem : {self.problem}")
+        print(f"{'='*60}")
+        for i, step in enumerate(self.steps, 1):
+            print(f"  Step {i}: {step}")
+        if self.conclusion:
+            print(f"\n  ✔ Conclusion: {self.conclusion}")
+        print(f"{'='*60}\n")
+
+
+# ---------------------------------------------------------------------------
+# 2. Socratic Dialogue – Self-questioning reflection loop
+# ---------------------------------------------------------------------------
+
+class SocraticDialogue:
+    """Generates probing questions to deepen understanding of a topic."""
+
+    QUESTION_TEMPLATES = [
+        "What do I actually know about '{topic}'?",
+        "What assumptions am I making about '{topic}'?",
+        "What evidence supports my current view of '{topic}'?",
+        "What would change my mind about '{topic}'?",
+        "What are the strongest counter-arguments to '{topic}'?",
+        "What are the second-order consequences of '{topic}'?",
+        "If I am wrong about '{topic}', what is most likely the truth?",
+    ]
+
+    def __init__(self, topic: str):
+        self.topic = topic
+        self.insights: List[str] = []
+
+    def reflect(self) -> List[str]:
+        questions = [
+            q.format(topic=self.topic) for q in self.QUESTION_TEMPLATES
+        ]
+        return questions
+
+    def add_insight(self, insight: str):
+        self.insights.append(insight)
+
+    def display(self):
+        print(f"\n{'='*60}")
+        print(f"SOCRATIC DIALOGUE — Topic: {self.topic}")
+        print(f"{'='*60}")
+        for q in self.reflect():
+            print(f"  ❓ {q}")
+        if self.insights:
+            print("\n  💡 Insights gathered:")
+            for ins in self.insights:
+                print(f"     • {ins}")
+        print(f"{'='*60}\n")
+
+
+# ---------------------------------------------------------------------------
+# 3. Hypothesis Engine – Generate & evaluate hypotheses
+# ---------------------------------------------------------------------------
+
+class Hypothesis:
+    def __init__(self, statement: str, confidence: float = 0.5):
+        self.statement = statement
+        self.confidence = max(0.0, min(1.0, confidence))  # clamp [0,1]
+        self.evidence_for: List[str] = []
+        self.evidence_against: List[str] = []
+
+    def support(self, evidence: str, boost: float = 0.1):
+        self.evidence_for.append(evidence)
+        self.confidence = min(1.0, self.confidence + boost)
+
+    def challenge(self, evidence: str, penalty: float = 0.1):
+        self.evidence_against.append(evidence)
+        self.confidence = max(0.0, self.confidence - penalty)
+
+    def verdict(self) -> str:
+        if self.confidence >= 0.8:
+            return "STRONGLY SUPPORTED"
+        elif self.confidence >= 0.6:
+            return "PLAUSIBLE"
+        elif self.confidence >= 0.4:
+            return "UNCERTAIN"
+        elif self.confidence >= 0.2:
+            return "UNLIKELY"
+        else:
+            return "REJECTED"
+
+    def display(self):
+        bar = int(self.confidence * 20)
+        bar_str = "█" * bar + "░" * (20 - bar)
+        print(f"\n  Hypothesis : {self.statement}")
+        print(f"  Confidence : [{bar_str}] {self.confidence:.0%}  → {self.verdict()}")
+        if self.evidence_for:
+            print("  Evidence ✔ :", "; ".join(self.evidence_for))
+        if self.evidence_against:
+            print("  Evidence ✘ :", "; ".join(self.evidence_against))
+
+
+class HypothesisEngine:
+    def __init__(self, question: str):
+        self.question = question
+        self.hypotheses: List[Hypothesis] = []
+
+    def add_hypothesis(self, h: Hypothesis) -> "HypothesisEngine":
+        self.hypotheses.append(h)
+        return self
+
+    def best(self) -> Optional[Hypothesis]:
+        return max(self.hypotheses, key=lambda h: h.confidence, default=None)
+
+    def display(self):
+        print(f"\n{'='*60}")
+        print(f"HYPOTHESIS ENGINE — Question: {self.question}")
+        print(f"{'='*60}")
+        for h in self.hypotheses:
+            h.display()
+        best = self.best()
+        if best:
+            print(f"\n  🏆 Best hypothesis: \"{best.statement}\"")
+        print(f"{'='*60}\n")
+
+
+# ---------------------------------------------------------------------------
+# 4. MetaCognition – Monitor the quality of thinking
+# ---------------------------------------------------------------------------
+
+class MetaCognition:
+    """Evaluates the reasoning process itself for biases and gaps."""
+
+    BIASES = [
+        "Confirmation bias     – favouring info that confirms existing beliefs",
+        "Availability heuristic– over-weighting easily recalled examples",
+        "Anchoring bias        – over-relying on the first piece of information",
+        "Dunning-Kruger effect – overestimating knowledge in unfamiliar areas",
+        "Sunk cost fallacy     – continuing because of past investment",
+        "Recency bias          – giving more weight to recent events",
+    ]
+
+    def __init__(self, thinking_summary: str):
+        self.summary = thinking_summary
+        self.warnings: List[str] = []
+
+    def self_check(self):
+        """Prompt the thinker to audit their own reasoning."""
+        self.warnings = [
+            "Am I seeking disconfirming evidence as actively as confirming?",
+            "Have I considered at least three alternative explanations?",
+            "Am I reasoning from first principles or copying a pattern?",
+            "Is my confidence calibrated to the actual evidence available?",
+            "Have I identified the crux – the single most important uncertainty?",
+        ]
+
+    def display(self):
+        print(f"\n{'='*60}")
+        print(f"META-COGNITION AUDIT")
+        print(f"{'='*60}")
+        print(f"  Summary of thinking:\n  {textwrap.fill(self.summary, 56, initial_indent='  ')}")
+        print("\n  ⚠ Self-check questions:")
+        self.self_check()
+        for w in self.warnings:
+            print(f"     • {w}")
+        print("\n  📋 Common cognitive biases to watch for:")
+        for b in self.BIASES:
+            print(f"     – {b}")
+        print(f"{'='*60}\n")
+
+
+# ---------------------------------------------------------------------------
+# 5. Analogical Mapper – Cross-domain pattern recognition
+# ---------------------------------------------------------------------------
+
+class AnalogicalMapper:
+    """Maps structural similarities between different domains."""
+
+    def __init__(self, source_domain: str, target_domain: str):
+        self.source = source_domain
+        self.target = target_domain
+        self.mappings: List[tuple] = []
+
+    def map(self, source_concept: str, target_concept: str, explanation: str):
+        self.mappings.append((source_concept, target_concept, explanation))
+        return self
+
+    def display(self):
+        print(f"\n{'='*60}")
+        print(f"ANALOGICAL MAPPER")
+        print(f"  Source domain : {self.source}")
+        print(f"  Target domain : {self.target}")
+        print(f"{'='*60}")
+        for src, tgt, exp in self.mappings:
+            print(f"  {src:20s} ←→  {tgt}")
+            print(f"    ↳ {exp}")
+        print(f"{'='*60}\n")
+
+
+# ---------------------------------------------------------------------------
+# Demo – run all deep-thinking modules on a sample problem
+# ---------------------------------------------------------------------------
+
+def demo():
+    print("\n" + "★" * 60)
+    print("  AI MORPHASIS 2.0 — DEEP THINKING ENGINE")
+    print("★" * 60)
+
+    # 1. Reasoning Chain
+    chain = ReasoningChain("Can an AI system be truly creative?")
+    chain.add_step("Define creativity: producing novel, valuable output.")
+    chain.add_step("AI can generate outputs not seen in training data.")
+    chain.add_step("Novelty alone is not sufficient — value requires context.")
+    chain.add_step("AI lacks intrinsic motivation, but can simulate goal-directed search.")
+    chain.add_step("Human judges ultimately determine 'value', so creativity is relational.")
+    chain.conclude("AI exhibits functional creativity within human-defined value frameworks.")
+    chain.display()
+
+    time.sleep(0.3)
+
+    # 2. Socratic Dialogue
+    sd = SocraticDialogue("AI consciousness")
+    sd.add_insight("Consciousness may require subjective experience, which is hard to verify externally.")
+    sd.add_insight("Functional equivalence does not guarantee phenomenal equivalence.")
+    sd.display()
+
+    time.sleep(0.3)
+
+    # 3. Hypothesis Engine
+    engine = HypothesisEngine("Will general AI surpass human-level reasoning by 2040?")
+    h1 = Hypothesis("Yes – exponential compute growth will close the gap.", confidence=0.5)
+    h1.support("Transformer scaling laws still hold", boost=0.15)
+    h1.challenge("Architectural plateaus observed after 2024", penalty=0.1)
+
+    h2 = Hypothesis("No – reasoning requires embodied experience beyond pattern matching.", confidence=0.5)
+    h2.support("Symbol grounding problem remains unsolved", boost=0.2)
+    h2.challenge("Multimodal models show emergent grounding abilities", penalty=0.05)
+
+    engine.add_hypothesis(h1).add_hypothesis(h2)
+    engine.display()
+
+    time.sleep(0.3)
+
+    # 4. MetaCognition
+    meta = MetaCognition(
+        "Evaluated AI creativity and consciousness using deductive steps, "
+        "reflective questioning, and probabilistic hypothesis testing."
+    )
+    meta.display()
+
+    time.sleep(0.3)
+
+    # 5. Analogical Mapper
+    mapper = AnalogicalMapper("Evolution by natural selection", "Machine learning optimisation")
+    mapper.map("Population of organisms", "Batch of model weights",
+               "Both represent a diverse set of candidate solutions.")
+    mapper.map("Fitness function",        "Loss / reward function",
+               "Selects which candidates survive and propagate.")
+    mapper.map("Mutation / crossover",    "Gradient descent + regularisation",
+               "Introduces variation while maintaining useful structure.")
+    mapper.map("Speciation",              "Model fine-tuning / branching",
+               "Divergence into specialised forms for different niches.")
+    mapper.display()
+
+    print("★" * 60)
+    print("  Deep thinking session complete.")
+    print("★" * 60 + "\n")
 
 
 def main():
-    print("ai deepthinking")
+    print("ai deepthinking")   # preserves original line
+    demo()
 
 
 if __name__ == "__main__":
