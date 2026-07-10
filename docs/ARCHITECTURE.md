@@ -17,9 +17,9 @@
 
 AI-Morphasis 2.0 is a Python-based AI system focused on adaptive agents, reinforcement learning, and structured reasoning. The current implementation combines three major capabilities:
 
-1. **Agent orchestration and behavior management** using a multi-agent framework in `/src/agents/super_agentic_agents.py`.
-2. **Neural learning components** (DQN and policy models) in `/src/models/neural_network.py`.
-3. **Deep reasoning tools** in `/Deep thinking`, implemented as reusable reasoning modules.
+1. **Agent orchestration and behavior management** using a multi-agent framework in `src/agents/super_agentic_agents.py`.
+2. **Neural learning components** (DQN and policy models) in `src/models/neural_network.py`.
+3. **Deep reasoning tools** in the root-level script file `Deep thinking` (no `.py` extension; legacy name with a space), implemented as reusable reasoning modules.
 
 The architecture is intentionally modular so teams can evolve training logic, reasoning behavior, and deployment independently.
 
@@ -42,8 +42,8 @@ The architecture is intentionally modular so teams can evolve training logic, re
 |            ^                               ^                            |
 |            |                               |                            |
 |   +--------------------+       +---------------------+                  |
-|   | Deep Thinking      |       | Data Processing     |                  |
-|   | Deep thinking      |       | src/data            |                  |
+|   | Reasoning Engine   |       | Data Processing     |                  |
+|   | Deep thinking file |       | src/data            |                  |
 |   +--------------------+       +---------------------+                  |
 |            ^                               ^                            |
 |            +----------------+--------------+                            |
@@ -72,9 +72,9 @@ Input/Task
 
 ## 2. Component Architecture
 
-### 2.1 Agent system (`/src/agents/`)
+### 2.1 Agent system (`src/agents/`)
 
-**Primary file:** `/src/agents/super_agentic_agents.py`
+**Primary file:** `src/agents/super_agentic_agents.py`
 
 This module defines the full agent hierarchy and lifecycle control.
 
@@ -115,13 +115,13 @@ System-level management is handled by:
 - Analyzer agents: interpretation and diagnostics.
 - Learner agents: adaptation, memory updates, and pattern evolution.
 
-This split enables scaling by role (for example: many executors, fewer orchestrators).
+This split enables scaling by role (for example, many executors and fewer orchestrators).
 
 ---
 
-### 2.2 Model layer (`/src/models/`)
+### 2.2 Model layer (`src/models/`)
 
-**Primary file:** `/src/models/neural_network.py`
+**Primary file:** `src/models/neural_network.py`
 
 This layer provides TensorFlow/Keras models and training primitives.
 
@@ -170,7 +170,7 @@ if len(replay) >= 32:
 
 ---
 
-### 2.3 Training layer (`/src/training/`)
+### 2.3 Training layer (`src/training/`)
 
 The test suite references:
 
@@ -178,7 +178,7 @@ The test suite references:
 - `AgentTrainer`
 - expected import path: `src.training.train`
 
-These interfaces are validated in `/tests/test_models.py` (`TestTrainingEnvironment`, `TestAgentTrainer`) and represent the intended orchestration contract for production training loops:
+These interfaces are validated in `tests/test_models.py` (`TestTrainingEnvironment`, `TestAgentTrainer`) and represent the intended orchestration contract for production training loops:
 
 - experience collection
 - batch training
@@ -189,14 +189,14 @@ These interfaces are validated in `/tests/test_models.py` (`TestTrainingEnvironm
 
 ---
 
-### 2.4 Config layer (`/src/config/` + `.env`)
+### 2.4 Config layer (`src/config/` + `.env`)
 
 **Primary files:**
 
-- `/src/config/model_config.py`
-- `/.env.example`
+- `src/config/model_config.py`
+- `.env.example`
 
-`model_config.py` defines registry-based configurations (for example `dqn_config`, `policy_config`, `large_config`) plus lookup helpers:
+`model_config.py` defines concrete registry entries including `dqn_config`, `policy_config`, and `large_config`, plus lookup helpers:
 
 - `get_config(config_name)`
 - `list_configs()`
@@ -216,9 +216,9 @@ This split supports both:
 
 ---
 
-### 2.5 Data layer (`/src/data/` + `/storage/`)
+### 2.5 Data layer (`src/data/` + `storage/`)
 
-**Primary code file:** `/src/data/preprocessing.py`
+**Primary code file:** `src/data/preprocessing.py`
 
 Data-processing components include:
 
@@ -239,7 +239,7 @@ Persistence patterns currently include:
 
 ## 3. Deep Thinking Engine Architecture
 
-**Primary file:** `/Deep thinking`
+**Primary file:** `Deep thinking` (legacy root-level script filename with a space and no extension; non-importable as a standard Python module name; recommended future rename: `deep_thinking.py`)
 
 The deep thinking engine is built from five explicit reasoning modules:
 
@@ -271,7 +271,7 @@ Problem/Topic
 
 ### Integration points with agent system
 
-Recommended integration between `/Deep thinking` and `/src/agents/super_agentic_agents.py`:
+Recommended integration between the current reasoning module file (`Deep thinking`, planned to be renamed to `deep_thinking.py`) and `src/agents/super_agentic_agents.py`:
 
 - `AnalyzerAgent.think(...)` can invoke `ReasoningChain` + `HypothesisEngine` for structured diagnostic output.
 - `LearnerAgent.learn_from_experience(...)` can add `MetaCognition` checks before committing semantic memory.
@@ -349,8 +349,8 @@ Key characteristics:
 - Model/data persistence is filesystem-backed.
 - Logging is Python logging in core model code and `loguru` in project documentation references.
 - CI workflows exist in:
-  - `/.github/workflows/django.yml`
-  - `/workflows/tests.yml`
+  - `.github/workflows/django.yml`
+  - `workflows/tests.yml`
 
 ### 5.2 Device handling (CPU/GPU)
 
@@ -392,7 +392,7 @@ Potential sinks:
 
 ## 6. Testing Strategy
 
-**Primary suite:** `/tests/test_models.py`
+**Primary suite:** `tests/test_models.py`
 
 ### 6.1 Unit organization
 
@@ -426,7 +426,7 @@ This gives high confidence in end-to-end RL loop behavior.
 
 ### 6.3 Performance and benchmark considerations
 
-`/workflows/tests.yml` contains a dedicated `performance` job with benchmark hooks (`pytest-benchmark`) and optional memory profiling. This supports progressive non-functional validation without coupling benchmark tooling to all local developer flows.
+`workflows/tests.yml` contains a dedicated `performance` job with benchmark hooks (`pytest-benchmark`) and optional memory profiling. This supports progressive non-functional validation without coupling benchmark tooling to all local developer flows.
 
 ### 6.4 Practical CI caveat
 
@@ -440,7 +440,7 @@ This section describes how to extend architecture safely with minimal coupling.
 
 ### 7.1 Add a new agent type
 
-1. Create subclass of `BaseAgent` in `/src/agents/super_agentic_agents.py`.
+1. Create subclass of `BaseAgent` in `src/agents/super_agentic_agents.py`.
 2. Implement `think(...)` and `act(...)`.
 3. Register in `AgentFactory._agent_templates`.
 4. Validate via agent lifecycle flows (`AgentSystem.add_agent`, task submission).
@@ -464,19 +464,19 @@ class PlannerAgent(BaseAgent):
 1. Add architecture changes in `DQNNetwork` or `PolicyNetwork`.
 2. Keep constructor signatures backward-compatible where possible.
 3. Update `AgentLearningModel` wiring if new outputs/losses are introduced.
-4. Add shape and training-path tests in `/tests/test_models.py`.
+4. Add shape and training-path tests in `tests/test_models.py`.
 
 ### 7.3 Implement a new reasoning module
 
-1. Add class in `/Deep thinking` with clear single responsibility.
+1. First migrate the legacy reasoning file `Deep thinking` to `deep_thinking.py`, then add the new class with clear single responsibility.
 2. Keep method surface composable (similar to `display`, fluent methods).
 3. Integrate from agent `think(...)` methods as optional reasoning stage.
 4. Add deterministic tests once dedicated deep-thinking tests are introduced.
 
 ### 7.4 Extend configuration
 
-1. Add new profile in `/src/config/model_config.py` and register in `CONFIG_REGISTRY`.
-2. Add corresponding env knobs in `/.env.example` where runtime tuning is required.
+1. Add new profile in `src/config/model_config.py` and register in `CONFIG_REGISTRY`.
+2. Add corresponding env knobs in `.env.example` where runtime tuning is required.
 3. Use `get_config(...)` to avoid ad hoc config dictionaries across code paths.
 
 ---
@@ -485,7 +485,7 @@ class PlannerAgent(BaseAgent):
 
 Current architecture and workflows are centered on:
 
-- **Python 3.8+ runtime** (workflow matrices include multiple versions)
+- **Python 3.8+ runtime** (recommended production baseline: Python 3.10+; workflow matrices include multiple versions)
 - **TensorFlow/Keras** for neural model definition and training
 - **NumPy** for tensor/array preprocessing and replay batching
 - **Pytest** for unit/integration test execution
