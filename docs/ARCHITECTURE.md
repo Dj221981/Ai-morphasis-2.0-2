@@ -20,7 +20,7 @@ The current repository structure reflects those responsibilities:
 - `src/models/neural_network.py` contains `DQNNetwork`, `PolicyNetwork`, `AgentLearningModel`, and `ExperienceReplay`.
 - `src/config/model_config.py` defines small, standard, large, and continuous-control configuration presets.
 - `src/data/preprocessing.py` is the placeholder boundary for input preparation and normalization.
-- `Deep thinking` contains the standalone deep-thinking engine.
+- The root-level `Deep thinking` script contains the standalone deep-thinking engine.
 - `tests/test_models.py` provides model, persistence, replay-buffer, and training-oriented coverage.
 - `workflows/tests.yml` defines the intended lint, test, quality, security, and performance automation.
 
@@ -126,7 +126,7 @@ These configurations encode state sizes, action sizes, learning rates, batch siz
 
 ## 3. Deep Thinking Module
 
-The `Deep thinking` script expands the project beyond pure reinforcement learning. It defines:
+The root-level `Deep thinking` script expands the project beyond pure reinforcement learning. It defines:
 
 - `ReasoningChain`
 - `SocraticDialogue`
