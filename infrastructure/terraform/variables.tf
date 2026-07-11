@@ -33,8 +33,8 @@ variable "db_password" {
     condition     = var.cloud_provider != "aws" || length(var.db_password) > 0
     error_message = "db_password must be provided when cloud_provider is aws."
   }
-  variable "rds_deletion_protection" {
-    type    = bool
-    default = false
-  }
+}
+variable "rds_deletion_protection" {
+  type    = bool
+  default = false
 }
