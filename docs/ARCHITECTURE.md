@@ -20,7 +20,7 @@ The current repository structure reflects those responsibilities:
 - `src/models/neural_network.py` contains `DQNNetwork`, `PolicyNetwork`, `AgentLearningModel`, and `ExperienceReplay`.
 - `src/config/model_config.py` defines small, standard, large, and continuous-control configuration presets.
 - `src/data/preprocessing.py` is the placeholder boundary for input preparation and normalization.
-- The repository root contains a file literally named `Deep thinking`; it implements the standalone deep-thinking engine.
+- The repository root contains a file literally named `Deep thinking`; the guide preserves that exact filename because it matches the current repository layout, even though the space is unconventional. The file implements the standalone deep-thinking engine.
 - `tests/test_models.py` provides model, persistence, replay-buffer, and training-oriented coverage.
 - `workflows/tests.yml` defines the intended lint, test, quality, security, and performance automation.
 
