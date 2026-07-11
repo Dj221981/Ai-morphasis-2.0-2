@@ -1,0 +1,9 @@
+{
+  "title": "Inference Metrics",
+  "schemaVersion": 39,
+  "version": 1,
+  "panels": [
+    {"type": "timeseries", "title": "Requests per Second"},
+    {"type": "timeseries", "title": "P95 Latency"}
+  ]
+}

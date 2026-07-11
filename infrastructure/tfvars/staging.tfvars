@@ -1,0 +1,5 @@
+project_name   = "ai-morphasis"
+environment    = "staging"
+cloud_provider = "aws"
+aws_region     = "us-east-1"
+db_password    = "REPLACE_WITH_STAGING_PASSWORD"

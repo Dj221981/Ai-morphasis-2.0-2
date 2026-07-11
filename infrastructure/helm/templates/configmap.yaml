@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-config
+data:
+  APP_ENV: {{ .Values.env.APP_ENV | quote }}
+  LOG_LEVEL: {{ .Values.env.LOG_LEVEL | quote }}
+  MODEL_PATH: {{ .Values.env.MODEL_PATH | quote }}
+  TF_SERVING_URL: {{ .Values.env.TF_SERVING_URL | quote }}

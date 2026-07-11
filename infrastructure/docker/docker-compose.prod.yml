@@ -1,0 +1,23 @@
+version: "3.9"
+services:
+  app:
+    build:
+      context: ../../
+      dockerfile: infrastructure/docker/Dockerfile
+    environment:
+      APP_ENV: production
+      LOG_LEVEL: INFO
+      TF_SERVING_URL: http://tensorflow-serving:8501
+      MODEL_PATH: /models/latest
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    depends_on:
+      - tensorflow-serving
+
+  tensorflow-serving:
+    image: tensorflow/serving:2.15.0
+    command: --port=8500 --rest_api_port=8501 --model_name=ai_morphasis --model_base_path=/models
+    volumes:
+      - ../../storage:/models:ro
+    restart: unless-stopped

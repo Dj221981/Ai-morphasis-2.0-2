@@ -1,0 +1,33 @@
+replicaCount: 2
+image:
+  repository: ghcr.io/dj221981/ai-morphasis
+  tag: latest
+  pullPolicy: IfNotPresent
+service:
+  type: ClusterIP
+  port: 80
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+env:
+  APP_ENV: production
+  LOG_LEVEL: INFO
+  MODEL_PATH: /models/latest
+  TF_SERVING_URL: http://tensorflow-serving:8501
+secrets:
+  DATABASE_URL: ""
+ingress:
+  enabled: false
+  className: ""
+  host: ai-morphasis.local
+  path: /
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  cpuUtilization: 70
+  memoryUtilization: 75

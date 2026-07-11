@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: ai-morphasis
+    static_configs:
+      - targets: ["ai-morphasis.ai-morphasis.svc.cluster.local:80"]
+
+  - job_name: tensorflow-serving
+    static_configs:
+      - targets: ["tensorflow-serving.ai-morphasis.svc.cluster.local:8501"]
