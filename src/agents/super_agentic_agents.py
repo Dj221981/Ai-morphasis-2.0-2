@@ -17,6 +17,7 @@ Features:
 
 import uuid
 import logging
+import threading
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Callable, Set
 from dataclasses import dataclass, field
@@ -58,6 +59,29 @@ class TaskPriority(Enum):
     NORMAL = 3
     LOW = 2
     DEFERRED = 1
+
+
+class TaskStatus(Enum):
+    """Defines valid task lifecycle states."""
+    PENDING = "pending"
+    ASSIGNED = "assigned"
+    RUNNING = "running"
+    RETRYING = "retrying"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+# Guarded state transitions for task lifecycle
+TASK_STATUS_TRANSITIONS: Dict[TaskStatus, Set[TaskStatus]] = {
+    TaskStatus.PENDING: {TaskStatus.ASSIGNED, TaskStatus.CANCELLED},
+    TaskStatus.ASSIGNED: {TaskStatus.RUNNING, TaskStatus.RETRYING, TaskStatus.CANCELLED},
+    TaskStatus.RUNNING: {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.RETRYING, TaskStatus.CANCELLED},
+    TaskStatus.RETRYING: {TaskStatus.ASSIGNED, TaskStatus.RUNNING, TaskStatus.FAILED, TaskStatus.CANCELLED},
+    TaskStatus.COMPLETED: set(),
+    TaskStatus.FAILED: set(),
+    TaskStatus.CANCELLED: set(),
+}
 
 
 @dataclass
@@ -122,14 +146,42 @@ class Task:
     description: str = ""
     priority: TaskPriority = TaskPriority.NORMAL
     assigned_to: Optional[str] = None
-    status: str = "pending"
+    status: TaskStatus = TaskStatus.PENDING
     created_at: datetime = field(default_factory=datetime.now)
+    assigned_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     result: Any = None
     error: Optional[str] = None
     parameters: Dict[str, Any] = field(default_factory=dict)
     dependencies: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    retry_count: int = 0
+    max_retries: int = 3
+    last_retry_at: Optional[datetime] = None
+
+    def transition_to(self, new_status: TaskStatus) -> bool:
+        """Perform guarded task status transition."""
+        allowed = TASK_STATUS_TRANSITIONS.get(self.status, set())
+        if new_status not in allowed:
+            logger.warning(
+                f"Invalid task status transition for {self.id}: {self.status.value} -> {new_status.value}"
+            )
+            return False
+
+        self.status = new_status
+        now = datetime.now()
+
+        if new_status == TaskStatus.ASSIGNED:
+            self.assigned_at = now
+        elif new_status == TaskStatus.RUNNING:
+            self.started_at = now
+        elif new_status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
+            self.completed_at = now
+        elif new_status == TaskStatus.RETRYING:
+            self.last_retry_at = now
+
+        return True
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert task to dictionary."""
@@ -138,14 +190,19 @@ class Task:
             "description": self.description,
             "priority": self.priority.name,
             "assigned_to": self.assigned_to,
-            "status": self.status,
+            "status": self.status.value,
             "created_at": self.created_at.isoformat(),
+            "assigned_at": self.assigned_at.isoformat() if self.assigned_at else None,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "result": self.result,
             "error": self.error,
             "parameters": self.parameters,
             "dependencies": self.dependencies,
-            "metadata": self.metadata
+            "metadata": self.metadata,
+            "retry_count": self.retry_count,
+            "max_retries": self.max_retries,
+            "last_retry_at": self.last_retry_at.isoformat() if self.last_retry_at else None,
         }
 
 
@@ -160,7 +217,8 @@ class BaseAgent(ABC):
         self,
         name: str,
         role: AgentRole = AgentRole.EXECUTOR,
-        max_capabilities: int = 50
+        max_capabilities: int = 50,
+        max_active_tasks: int = 10,
     ):
         """Initialize a base agent."""
         self.id = str(uuid.uuid4())
@@ -177,6 +235,7 @@ class BaseAgent(ABC):
         self.active_tasks: Dict[str, Task] = {}
         self.completed_tasks: List[Task] = []
         self.task_history: List[Task] = []
+        self.max_active_tasks = max_active_tasks
 
         self.parent_agent: Optional[str] = None
         self.child_agents: Set[str] = set()
@@ -188,6 +247,8 @@ class BaseAgent(ABC):
             "avg_task_time": 0.0,
             "success_rate": 1.0
         }
+
+        self._lock = threading.RLock()
 
         logger.info(f"Initialized {self.role.value} agent: {self.name} (ID: {self.id})")
 
@@ -203,36 +264,74 @@ class BaseAgent(ABC):
 
     def register_capability(self, capability: AgentCapability) -> bool:
         """Register a new capability."""
-        if len(self.capabilities) >= self.max_capabilities:
-            logger.warning(f"Agent {self.name} has reached max capabilities limit")
-            return False
+        with self._lock:
+            if len(self.capabilities) >= self.max_capabilities:
+                logger.warning(f"Agent {self.name} has reached max capabilities limit")
+                return False
 
-        self.capabilities[capability.name] = capability
-        self.memory.store_semantic(f"capability:{capability.name}", capability)
+            self.capabilities[capability.name] = capability
+            self.memory.store_semantic(f"capability:{capability.name}", capability)
+            self.last_activity = datetime.now()
+
         logger.info(f"Capability '{capability.name}' registered for {self.name}")
         return True
 
     def get_capability(self, name: str) -> Optional[AgentCapability]:
         """Retrieve a registered capability."""
-        return self.capabilities.get(name)
+        with self._lock:
+            return self.capabilities.get(name)
 
     def list_capabilities(self) -> List[str]:
         """Get list of all capability names."""
-        return list(self.capabilities.keys())
+        with self._lock:
+            return list(self.capabilities.keys())
 
     def assign_task(self, task: Task) -> bool:
         """Assign a task to this agent."""
-        self.active_tasks[task.id] = task
-        task.assigned_to = self.id
-        task.status = "assigned"
-        self.memory.store_episode(f"task:{task.id}", task)
+        with self._lock:
+            if len(self.active_tasks) >= self.max_active_tasks:
+                logger.warning(
+                    f"Agent {self.name} at capacity ({self.max_active_tasks}); cannot assign task {task.id}"
+                )
+                return False
+
+            if task.status == TaskStatus.PENDING:
+                if not task.transition_to(TaskStatus.ASSIGNED):
+                    return False
+            elif task.status not in (TaskStatus.RETRYING, TaskStatus.ASSIGNED):
+                logger.warning(
+                    f"Task {task.id} in invalid state for assignment: {task.status.value}"
+                )
+                return False
+
+            task.assigned_to = self.id
+            self.active_tasks[task.id] = task
+            self.memory.store_episode(f"task:{task.id}", task)
+            self.last_activity = datetime.now()
+
         logger.info(f"Task {task.id} assigned to agent {self.name}")
         return True
 
     def execute_task(self, task: Task) -> Any:
-        """Execute an assigned task."""
+        """Execute an assigned task with retry and safe cleanup semantics."""
+        start_time = datetime.now()
+        should_retry = False
+
         try:
-            self.status = AgentStatus.BUSY
+            with self._lock:
+                self.status = AgentStatus.BUSY
+                self.last_activity = datetime.now()
+
+                if task.status in (TaskStatus.ASSIGNED, TaskStatus.RETRYING):
+                    if not task.transition_to(TaskStatus.RUNNING):
+                        raise RuntimeError(
+                            f"Task {task.id} cannot transition to running from {task.status.value}"
+                        )
+                elif task.status != TaskStatus.RUNNING:
+                    raise RuntimeError(
+                        f"Task {task.id} must be assigned/retrying/running to execute; got {task.status.value}"
+                    )
+
             logger.info(f"Agent {self.name} executing task {task.id}")
 
             # Think phase
@@ -241,33 +340,65 @@ class BaseAgent(ABC):
             # Act phase
             result = self.act(reasoning)
 
-            # Update task
-            task.status = "completed"
-            task.result = result
-            task.completed_at = datetime.now()
+            with self._lock:
+                if not task.transition_to(TaskStatus.COMPLETED):
+                    raise RuntimeError(
+                        f"Task {task.id} failed status transition to completed from {task.status.value}"
+                    )
+                task.result = result
+                task.error = None
+                self.completed_tasks.append(task)
+                self.task_history.append(task)
+                self._update_metrics(task, success=True, started_at=start_time)
+                self.status = AgentStatus.IDLE
+                self.last_activity = datetime.now()
 
-            # Update metrics
-            self._update_metrics(task, success=True)
-
-            self.active_tasks.pop(task.id, None)
-            self.completed_tasks.append(task)
-            self.task_history.append(task)
-
-            self.status = AgentStatus.IDLE
             logger.info(f"Task {task.id} completed successfully")
             return result
 
         except Exception as e:
-            task.status = "failed"
-            task.error = str(e)
-            task.completed_at = datetime.now()
-            self._update_metrics(task, success=False)
-            self.status = AgentStatus.ERROR
+            with self._lock:
+                task.error = str(e)
+
+                if task.retry_count < task.max_retries:
+                    task.retry_count += 1
+                    if task.status == TaskStatus.RUNNING:
+                        if task.transition_to(TaskStatus.RETRYING):
+                            should_retry = True
+                    elif task.status != TaskStatus.RETRYING:
+                        # Fallback in case status is unexpected due to upstream mutation
+                        task.status = TaskStatus.RETRYING
+                        task.last_retry_at = datetime.now()
+                        should_retry = True
+                else:
+                    if task.status == TaskStatus.RUNNING:
+                        task.transition_to(TaskStatus.FAILED)
+                    elif task.status != TaskStatus.FAILED:
+                        task.status = TaskStatus.FAILED
+                        task.completed_at = datetime.now()
+
+                self.task_history.append(task)
+                self._update_metrics(task, success=False, started_at=start_time)
+                self.status = AgentStatus.ERROR
+                self.last_activity = datetime.now()
+
             logger.error(f"Task {task.id} failed: {str(e)}")
+            if should_retry:
+                logger.info(
+                    f"Task {task.id} marked for retry ({task.retry_count}/{task.max_retries})"
+                )
             raise
 
-    def _update_metrics(self, task: Task, success: bool) -> None:
-        """Update performance metrics."""
+        finally:
+            with self._lock:
+                self.active_tasks.pop(task.id, None)
+                if self.status not in (AgentStatus.SUSPENDED,):
+                    # Avoid permanent ERROR lock-in for recoverable failures
+                    self.status = AgentStatus.IDLE
+                self.last_activity = datetime.now()
+
+    def _update_metrics(self, task: Task, success: bool, started_at: Optional[datetime] = None) -> None:
+        """Update performance metrics with rolling average duration."""
         if success:
             self.performance_metrics["tasks_completed"] += 1
         else:
@@ -278,20 +409,30 @@ class BaseAgent(ABC):
             self.performance_metrics["tasks_completed"] / total if total > 0 else 0
         )
 
+        # Compute rolling average task duration in seconds
+        end_time = task.completed_at or datetime.now()
+        ref_start = task.started_at or started_at or task.created_at
+        duration = max((end_time - ref_start).total_seconds(), 0.0)
+
+        current_avg = self.performance_metrics.get("avg_task_time", 0.0)
+        if total > 0:
+            self.performance_metrics["avg_task_time"] = ((current_avg * (total - 1)) + duration) / total
+
     def get_status(self) -> Dict[str, Any]:
         """Get comprehensive agent status."""
-        return {
-            "id": self.id,
-            "name": self.name,
-            "role": self.role.name,
-            "status": self.status.name,
-            "capabilities": self.list_capabilities(),
-            "active_tasks": len(self.active_tasks),
-            "completed_tasks": len(self.completed_tasks),
-            "performance": self.performance_metrics,
-            "created_at": self.created_at.isoformat(),
-            "last_activity": self.last_activity.isoformat()
-        }
+        with self._lock:
+            return {
+                "id": self.id,
+                "name": self.name,
+                "role": self.role.name,
+                "status": self.status.name,
+                "capabilities": list(self.capabilities.keys()),
+                "active_tasks": len(self.active_tasks),
+                "completed_tasks": len(self.completed_tasks),
+                "performance": dict(self.performance_metrics),
+                "created_at": self.created_at.isoformat(),
+                "last_activity": self.last_activity.isoformat()
+            }
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__}: {self.name} ({self.role.value})>"
@@ -327,8 +468,10 @@ class OrchestratorAgent(BaseAgent):
 
     def register_agent(self, agent: BaseAgent) -> bool:
         """Register an agent under this orchestrator."""
-        self.managed_agents[agent.id] = agent
-        agent.parent_agent = self.id
+        with self._lock:
+            self.managed_agents[agent.id] = agent
+            agent.parent_agent = self.id
+            self.last_activity = datetime.now()
         logger.info(f"Agent {agent.name} registered under orchestrator {self.name}")
         return True
 
@@ -486,6 +629,7 @@ class AgentSystem:
         self.agents: Dict[str, BaseAgent] = {self.orchestrator.id: self.orchestrator}
         self.global_task_queue: List[Task] = []
         self.completed_tasks: List[Task] = []
+        self.task_registry: Dict[str, Task] = {}
 
         self.system_metrics = {
             "total_agents": 1,
@@ -495,43 +639,52 @@ class AgentSystem:
             "avg_task_duration": 0.0
         }
 
+        self._lock = threading.RLock()
+
         logger.info(f"Initialized Agent System: {self.name}")
 
     def add_agent(self, agent: BaseAgent) -> bool:
         """Add an agent to the system."""
-        self.agents[agent.id] = agent
-        self.orchestrator.register_agent(agent)
-        self.system_metrics["total_agents"] += 1
+        with self._lock:
+            self.agents[agent.id] = agent
+            self.orchestrator.register_agent(agent)
+            self.system_metrics["total_agents"] += 1
         logger.info(f"Agent {agent.name} added to system")
         return True
 
     def remove_agent(self, agent_id: str) -> bool:
         """Remove an agent from the system."""
-        if agent_id in self.agents:
-            agent = self.agents.pop(agent_id)
-            self.system_metrics["total_agents"] -= 1
-            logger.info(f"Agent {agent.name} removed from system")
-            return True
+        with self._lock:
+            if agent_id in self.agents:
+                agent = self.agents.pop(agent_id)
+                self.system_metrics["total_agents"] -= 1
+                logger.info(f"Agent {agent.name} removed from system")
+                return True
         return False
 
     def get_agent(self, agent_id: str) -> Optional[BaseAgent]:
         """Retrieve an agent by ID."""
-        return self.agents.get(agent_id)
+        with self._lock:
+            return self.agents.get(agent_id)
 
     def create_task(
         self,
         description: str,
         parameters: Dict[str, Any],
-        priority: TaskPriority = TaskPriority.NORMAL
+        priority: TaskPriority = TaskPriority.NORMAL,
+        max_retries: int = 3,
     ) -> Task:
         """Create a new task."""
         task = Task(
             description=description,
             parameters=parameters,
-            priority=priority
+            priority=priority,
+            max_retries=max_retries,
         )
-        self.global_task_queue.append(task)
-        self.system_metrics["total_tasks"] += 1
+        with self._lock:
+            self.global_task_queue.append(task)
+            self.task_registry[task.id] = task
+            self.system_metrics["total_tasks"] += 1
         logger.info(f"Task {task.id} created: {description}")
         return task
 
@@ -540,24 +693,78 @@ class AgentSystem:
         if agent_id:
             agent = self.get_agent(agent_id)
             if agent:
-                return agent.assign_task(task)
+                assigned = agent.assign_task(task)
+                if assigned:
+                    self._remove_from_global_queue(task.id)
+                return assigned
         else:
-            return self.orchestrator.distribute_task(task)
+            assigned = self.orchestrator.distribute_task(task)
+            if assigned:
+                self._remove_from_global_queue(task.id)
+            return assigned
 
         logger.warning(f"Failed to submit task {task.id}")
         return False
 
+    def execute_task(self, task_id: str, agent_id: str) -> Any:
+        """Execute a task via a specific agent and aggregate system metrics/state."""
+        agent = self.get_agent(agent_id)
+        if not agent:
+            raise ValueError(f"Agent {agent_id} not found")
+
+        task = self.task_registry.get(task_id)
+        if not task:
+            raise ValueError(f"Task {task_id} not found")
+
+        start_time = datetime.now()
+        try:
+            result = agent.execute_task(task)
+            with self._lock:
+                if task.status == TaskStatus.COMPLETED:
+                    self.completed_tasks.append(task)
+                    self.system_metrics["successful_tasks"] += 1
+                self._update_system_task_duration(task, start_time)
+            return result
+        except Exception:
+            with self._lock:
+                if task.status == TaskStatus.RETRYING:
+                    # Requeue for retry dispatch
+                    self.global_task_queue.append(task)
+                elif task.status == TaskStatus.FAILED:
+                    self.system_metrics["failed_tasks"] += 1
+                self._update_system_task_duration(task, start_time)
+            raise
+
+    def _remove_from_global_queue(self, task_id: str) -> None:
+        """Remove task from global queue if present."""
+        with self._lock:
+            self.global_task_queue = [t for t in self.global_task_queue if t.id != task_id]
+
+    def _update_system_task_duration(self, task: Task, fallback_start: datetime) -> None:
+        """Update system-level rolling average task duration (seconds)."""
+        completed = self.system_metrics["successful_tasks"] + self.system_metrics["failed_tasks"]
+        if completed <= 0:
+            return
+
+        end_time = task.completed_at or datetime.now()
+        start_time = task.started_at or fallback_start
+        duration = max((end_time - start_time).total_seconds(), 0.0)
+
+        current_avg = self.system_metrics.get("avg_task_duration", 0.0)
+        self.system_metrics["avg_task_duration"] = ((current_avg * (completed - 1)) + duration) / completed
+
     def get_system_status(self) -> Dict[str, Any]:
         """Get comprehensive system status."""
-        return {
-            "system_name": self.name,
-            "system_id": self.id,
-            "created_at": self.created_at.isoformat(),
-            "agents": {aid: agent.get_status() for aid, agent in self.agents.items()},
-            "metrics": self.system_metrics,
-            "pending_tasks": len(self.global_task_queue),
-            "completed_tasks": len(self.completed_tasks)
-        }
+        with self._lock:
+            return {
+                "system_name": self.name,
+                "system_id": self.id,
+                "created_at": self.created_at.isoformat(),
+                "agents": {aid: agent.get_status() for aid, agent in self.agents.items()},
+                "metrics": dict(self.system_metrics),
+                "pending_tasks": len(self.global_task_queue),
+                "completed_tasks": len(self.completed_tasks)
+            }
 
     def to_json(self) -> str:
         """Serialize system status to JSON."""
@@ -646,7 +853,11 @@ def example_usage():
         parameters={"metric_type": "performance", "duration": "24h"}
     )
 
-    system.submit_task(task1, executor.id)
+    if system.submit_task(task1, executor.id):
+        try:
+            system.execute_task(task1.id, executor.id)
+        except Exception as exc:
+            logger.error(f"Task execution failed in example: {exc}")
 
     # Print system status
     print("\n" + "="*60)
