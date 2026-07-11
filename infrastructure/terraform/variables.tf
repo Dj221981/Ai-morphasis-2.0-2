@@ -30,9 +30,13 @@ variable "db_password" {
   sensitive = true
   default   = ""
   validation {
-    condition     = var.cloud_provider != "aws" || length(var.db_password) > 0
-    error_message = "db_password must be provided when cloud_provider is aws."
+    condition     = var.cloud_provider != "aws" || !var.enable_rds || length(var.db_password) > 0
+    error_message = "db_password must be provided when enable_rds is true on aws."
   }
+}
+variable "enable_rds" {
+  type    = bool
+  default = false
 }
 variable "rds_deletion_protection" {
   type    = bool

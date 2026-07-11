@@ -5,6 +5,9 @@ variable "db_password" {
   type      = string
   sensitive = true
 }
+variable "enable_rds" {
+  type = bool
+}
 variable "rds_deletion_protection" {
   type = bool
 }
