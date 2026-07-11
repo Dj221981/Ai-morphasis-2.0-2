@@ -18,6 +18,16 @@ spec:
       labels:
         app: ai-morphasis
     spec:
+      initContainers:
+        - name: validate-secrets
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - test "$DATABASE_URL" != "__SET_AT_DEPLOY_TIME__" && test "$API_KEY" != "__SET_AT_DEPLOY_TIME__"
+          envFrom:
+            - secretRef:
+                name: ai-morphasis-secrets
       containers:
         - name: ai-morphasis
           image: ghcr.io/dj221981/ai-morphasis:latest

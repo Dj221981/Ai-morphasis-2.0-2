@@ -2,6 +2,6 @@ route:
   receiver: default
 receivers:
   - name: default
-    # Replace webhook URL before non-local deployments.
+    # Set ALERTMANAGER_WEBHOOK_URL in deployment templating before production use.
     webhook_configs:
-      - url: http://example-webhook.local/alert
+      - url: ${ALERTMANAGER_WEBHOOK_URL}
