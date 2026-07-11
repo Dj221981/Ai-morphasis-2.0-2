@@ -3,9 +3,11 @@ storage "file" {
 }
 
 listener "tcp" {
-  # Local development template only. Use TLS and restricted interfaces in shared environments.
+  # Production-safe baseline: replace certificate paths with managed cert material.
   address     = "127.0.0.1:8200"
-  tls_disable = 1
+  tls_disable = 0
+  tls_cert_file = "/vault/tls/tls.crt"
+  tls_key_file  = "/vault/tls/tls.key"
 }
 
 ui = true

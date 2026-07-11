@@ -30,8 +30,8 @@ variable "db_password" {
   sensitive = true
   default   = ""
   validation {
-    condition     = var.cloud_provider != "aws" || !var.enable_rds || length(var.db_password) > 0
-    error_message = "db_password must be provided when enable_rds is true on aws."
+    condition     = var.cloud_provider != "aws" || !var.enable_rds || length(var.db_password) >= 12
+    error_message = "db_password must be at least 12 characters when enable_rds is true on aws."
   }
 }
 variable "enable_rds" {

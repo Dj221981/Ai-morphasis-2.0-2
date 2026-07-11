@@ -2,5 +2,6 @@ route:
   receiver: default
 receivers:
   - name: default
+    # Replace webhook URL before non-local deployments.
     webhook_configs:
       - url: http://example-webhook.local/alert
