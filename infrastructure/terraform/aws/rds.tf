@@ -15,5 +15,5 @@ resource "aws_db_instance" "metadata" {
   skip_final_snapshot    = true
   db_subnet_group_name   = aws_db_subnet_group.this.name
   publicly_accessible    = false
-  deletion_protection    = false
+  deletion_protection    = var.rds_deletion_protection
 }

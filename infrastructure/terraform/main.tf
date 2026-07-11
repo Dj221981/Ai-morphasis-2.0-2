@@ -14,6 +14,7 @@ module "aws" {
   environment  = var.environment
   aws_region   = var.aws_region
   db_password  = var.db_password
+  rds_deletion_protection = var.rds_deletion_protection
 }
 
 module "gcp" {

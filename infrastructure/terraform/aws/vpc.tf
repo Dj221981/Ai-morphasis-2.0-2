@@ -5,6 +5,9 @@ variable "db_password" {
   type      = string
   sensitive = true
 }
+variable "rds_deletion_protection" {
+  type = bool
+}
 
 resource "aws_vpc" "this" {
   cidr_block           = "10.40.0.0/16"
@@ -20,5 +23,14 @@ resource "aws_subnet" "private_a" {
   availability_zone = "${var.aws_region}a"
   tags = {
     Name = "${var.project_name}-${var.environment}-private-a"
+  }
+}
+
+resource "aws_subnet" "private_b" {
+  vpc_id            = aws_vpc.this.id
+  cidr_block        = "10.40.2.0/24"
+  availability_zone = "${var.aws_region}b"
+  tags = {
+    Name = "${var.project_name}-${var.environment}-private-b"
   }
 }

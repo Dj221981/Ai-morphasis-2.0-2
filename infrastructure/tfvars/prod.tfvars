@@ -2,4 +2,4 @@ project_name   = "ai-morphasis"
 environment    = "prod"
 cloud_provider = "aws"
 aws_region     = "us-east-1"
-db_password    = "REPLACE_WITH_PROD_PASSWORD"
+rds_deletion_protection = true
