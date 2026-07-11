@@ -263,13 +263,13 @@ For production readiness, the next testing layers should include:
 The recommended day-to-day development workflow for this repository is:
 
 1. Create or update a reproducible Python environment.
-2. install TensorFlow, pytest, and linting dependencies.
-3. choose a config preset from `src/config/model_config.py`.
-4. run unit tests before changing model logic.
-5. make focused changes to network architecture or training behavior.
-6. rerun targeted tests, then the broader suite.
-7. save artifacts locally for inspection.
-8. promote only passing changes into CI and container images.
+2. Install TensorFlow, pytest, and linting dependencies.
+3. Choose a config preset from `src/config/model_config.py`.
+4. Run unit tests before changing model logic.
+5. Make focused changes to network architecture or training behavior.
+6. Rerun targeted tests, then the broader suite.
+7. Save artifacts locally for inspection.
+8. Promote only passing changes into CI and container images.
 
 Even though the repository currently lacks a checked-in `requirements.txt` or `pyproject.toml`, the architecture should standardize one of those package manifests as soon as possible. That is not a cosmetic improvement; it is the baseline for reproducible local development, deterministic CI, and container builds.
 
