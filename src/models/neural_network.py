@@ -5,6 +5,7 @@ This module implements deep learning models using TensorFlow/Keras for training
 adaptive agents with reinforcement learning capabilities.
 """
 
+import pickle
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
@@ -351,7 +352,14 @@ class AgentLearningModel:
         Args:
             filepath: Path to save model
         """
-        self.network.save_weights(filepath)
+        # Build model if it has not been called yet
+        if not self.network.built:
+            dummy = tf.zeros((1, self.state_size))
+            self.network(dummy, training=False)
+
+        weights = self.network.get_weights()
+        with open(filepath, "wb") as f:
+            pickle.dump(weights, f)
         logger.info(f"Model saved to {filepath}")
 
     def load_model(self, filepath: str) -> None:
@@ -361,8 +369,18 @@ class AgentLearningModel:
         Args:
             filepath: Path to load model from
         """
-        self.network.load_weights(filepath)
+        # Build model if it has not been called yet
+        if not self.network.built:
+            dummy = tf.zeros((1, self.state_size))
+            self.network(dummy, training=False)
+
+        with open(filepath, "rb") as f:
+            weights = pickle.load(f)
+        self.network.set_weights(weights)
         if self.model_type == "dqn":
+            if not self.target_network.built:
+                dummy = tf.zeros((1, self.state_size))
+                self.target_network(dummy, training=False)
             self.target_network.set_weights(self.network.get_weights())
         logger.info(f"Model loaded from {filepath}")
 
