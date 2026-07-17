@@ -85,7 +85,7 @@ class AgentTrainer:
     checkpoint / history persistence.
 
     Args:
-        model: A fully initialised :class:`~src.models.neural_network.AgentLearningModel`.
+        model: A fully initialized :class:`~src.models.neural_network.AgentLearningModel`.
         config: Training configuration dictionary.  Recognised keys:
 
             - ``buffer_size`` (int, default 100000)

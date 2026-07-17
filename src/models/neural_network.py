@@ -84,7 +84,7 @@ class DQNNetwork(Model):
         self.output_layer = layers.Dense(action_size, activation=None)
 
         logger.info(
-            "DQN Network initialised: state_size=%d, action_size=%d, hidden_layers=%s",
+            "DQN Network initialized: state_size=%d, action_size=%d, hidden_layers=%s",
             state_size,
             action_size,
             hidden_layers,
@@ -169,7 +169,7 @@ class PolicyNetwork(Model):
         self.value_head = layers.Dense(1, activation=None)
 
         logger.info(
-            "Policy Network initialised: state_size=%d, action_size=%d, action_space=%s",
+            "Policy Network initialized: state_size=%d, action_size=%d, action_space=%s",
             state_size,
             action_size,
             action_space,
@@ -319,7 +319,7 @@ class AgentLearningModel:
         self.train_loss = keras.metrics.Mean(name="train_loss")
 
         logger.info(
-            "AgentLearningModel initialised: model_type=%s, state_size=%d, "
+            "AgentLearningModel initialized: model_type=%s, state_size=%d, "
             "action_size=%d, learning_rate=%g",
             model_type,
             state_size,
@@ -473,9 +473,12 @@ class AgentLearningModel:
             loss = self.loss_fn(target_q, current_q)
 
         gradients = tape.gradient(loss, self.network.trainable_weights)
-        self.optimizer.apply_gradients(
-            (g, w) for g, w in zip(gradients, self.network.trainable_weights) if g is not None
-        )
+        grad_pairs = [
+            (g, w)
+            for g, w in zip(gradients, self.network.trainable_weights)
+            if g is not None
+        ]
+        self.optimizer.apply_gradients(grad_pairs)
         return loss
 
     def _train_step_policy(
@@ -519,9 +522,12 @@ class AgentLearningModel:
             loss = policy_loss + _VALUE_LOSS_COEF * value_loss - _ENTROPY_COEF * entropy
 
         gradients = tape.gradient(loss, self.network.trainable_weights)
-        self.optimizer.apply_gradients(
-            (g, w) for g, w in zip(gradients, self.network.trainable_weights) if g is not None
-        )
+        grad_pairs = [
+            (g, w)
+            for g, w in zip(gradients, self.network.trainable_weights)
+            if g is not None
+        ]
+        self.optimizer.apply_gradients(grad_pairs)
         return loss
 
     # ── Target network & exploration ─────────────────────────────────────────
