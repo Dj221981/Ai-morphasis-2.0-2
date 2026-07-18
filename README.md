@@ -1,64 +1,111 @@
-# Hey there! 👋
+# Ai-morphasis-2.0-2
 
-Welcome to my GitHub profile! I'm a **Full-Stack Developer** passionate about creating innovative solutions across the web, cloud infrastructure, and game development. Currently building **Ai-morphasis 2.0**, an ambitious AI-driven project pushing the boundaries of what's possible.
+Ai-morphasis-2.0-2 is a Python FastAPI service with supporting AI model configuration code under `src/`.
 
-## 🚀 About Me
+## Repository layout
 
-I thrive on solving complex problems and building scalable, production-grade applications. With a balanced approach to technical excellence and creative problem-solving, I'm driven by the challenge of bringing ideas to life through code.
+```
+app/
+  main.py          FastAPI application (routes, middleware, auth, rate limiting)
+  settings.py      Validated settings loaded from environment on startup
+src/
+  config/          Model configuration registry
+  models/          Neural network modules (TensorFlow — optional)
+  data/            Data preprocessing utilities (TensorFlow — optional)
+  agents/          Agent orchestration code
+tests/             API and configuration unit tests
+Dockerfile         Multi-stage Docker build (non-root runtime)
+docker-compose.yml Local development / deployment compose file
+requirements.txt   Runtime dependencies (no TensorFlow)
+requirements-ml.txt  Optional TensorFlow stack
+```
 
-- 🔭 **Currently creating** Ai-morphasis 2.0 — a sophisticated AI system with evolving capabilities
-- 🌱 **Always learning** new architectures, frameworks, and best practices
-- 💡 **Interested in** Full-Stack Development, Cloud Infrastructure, Game Dev, and AI/ML applications
-- 🎮 **Passionate about** building engaging experiences across platforms
-- 💬 **Ask me about** scalable architecture, cloud solutions, game mechanics, or AI implementation
-- 📫 **Let's connect** — reach out via email or social media!
+## Quick start
 
-## 💻 Tech Stack
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
 
-- **Languages**: Python, JavaScript/TypeScript, and more
-- **Full-Stack**: Frontend UI → Backend APIs → Database Design
-- **Cloud & Infrastructure**: Deploying and scaling applications in the cloud
-- **Game Development**: Building interactive experiences
-- **AI/ML**: Implementing intelligent systems and algorithms
-- **DevOps & Testing**: GitHub Actions (CI/CD), Docker, pytest, flake8, code coverage tracking
+Copy and configure the environment file:
 
-## 🎯 Featured Work
+```bash
+cp .env.example .env
+# Set APP_ENV=development (required)
+# Optionally set API_KEY=<your-key> to enable authentication
+```
 
-- **[Ai-morphasis 2.0](https://github.com/Dj221981/Ai-morphasis-2.0-2)** — A cutting-edge AI system with comprehensive testing, advanced CI/CD pipelines, and multi-version Python support. Features professional-grade linting, code coverage tracking, and specialized DeepMind tool integration.
+Run the API:
 
-## 📊 GitHub Activity
+```bash
+APP_ENV=development uvicorn app.main:app --reload
+```
 
-![GitHub Stats](https://github-readme-stats.vercel.app/api?username=Dj221981&show_icons=true&theme=dark)
+Run tests:
 
-![Top Languages](https://github-readme-stats.vercel.app/api/top-langs/?username=Dj221981&layout=compact&theme=dark)
+```bash
+APP_ENV=development python -m pytest tests -q
+```
 
-## 🤝 Connect With Me
+## Docker
 
-Let's collaborate, discuss tech, or just chat!
+Build and run with Docker Compose:
 
-- **Email**: [darrenjris24@gmail.com](mailto:darrenjris24@gmail.com)
-- **Facebook**: [Connect on Facebook](#)
-- **YouTube**: [Subscribe on YouTube](#)
-- **LinkedIn**: [Connect on LinkedIn](#)
+```bash
+cp .env.example .env   # edit .env with your values
+docker compose up --build
+```
 
-## 🎮 Current Focus
+The API is available at `http://localhost:8000`. OpenAPI docs at `http://localhost:8000/docs` (disabled in `production`).
 
-Working on expanding **Ai-morphasis 2.0** with:
-- Enhanced AI capabilities and system architecture
-- Cloud infrastructure optimization
-- Integration with modern frameworks and tools
-- Comprehensive testing and deployment pipelines
-- Game development integrations
+## Configuration
 
-## 📝 My Approach
+All settings are loaded from environment variables or a `.env` file. The app **refuses to start** if required values are invalid.
 
-I believe in writing clean, maintainable code with solid testing practices. You'll notice my projects emphasize:
-- ✅ Comprehensive test coverage
-- 🔄 Automated CI/CD pipelines
-- 📦 Professional code quality standards
-- 🚀 Scalable architecture
-- 🎯 Production-ready deployments
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `APP_ENV` | ✅ | — | `development`, `staging`, or `production` |
+| `API_KEY` | No | `""` | X-API-Key for protected endpoints. Empty = auth disabled |
+| `LOG_LEVEL` | No | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` / `CRITICAL` |
+| `RATE_LIMIT` | No | `60/minute` | Rate limit for protected endpoints (slowapi format) |
 
----
+See `.env.example` for a full reference.
 
-⭐ **If you find my work interesting, feel free to star a repo or reach out to collaborate!**
+## Authentication
+
+Set `API_KEY` to a non-empty secret to enable authentication on protected endpoints. Pass the key as an `X-API-Key` header. Public endpoints (`/`, `/health`, `/ready`) are always accessible.
+
+```bash
+# Generate a key
+openssl rand -hex 32
+
+# Use in requests
+curl -H "X-API-Key: <your-key>" http://localhost:8000/configs
+```
+
+## API endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/` | No | Service identity |
+| `GET` | `/health` | No | Liveness probe |
+| `GET` | `/ready` | No | Readiness probe |
+| `GET` | `/configs` | When `API_KEY` set | Available model configuration presets |
+
+See `docs/API.md` for full endpoint reference.
+
+## Optional ML dependency set
+
+`src/models/` and `src/data/` require TensorFlow. Install:
+
+```bash
+pip install -r requirements-ml.txt
+```
+
+## CI
+
+GitHub Actions workflow runs syntax validation and tests on Python 3.11 and 3.12:
+- `.github/workflows/tests.yml`
+

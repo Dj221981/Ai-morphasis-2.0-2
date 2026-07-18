@@ -1,57 +1,77 @@
-# Software
-
-## Overview
-
-This document describes the software in this repository. It can be used as a quick reference for understanding the project, how it works, and how to get started.
+# Software Overview
 
 ## Purpose
 
-The goal of the software is to provide a clear, maintainable foundation for the Ai-morphasis 2.0-2 project.
+This repository provides a FastAPI service for Ai-morphasis-2.0-2 with supporting model configuration modules.
 
-## Features
+## Requirements
 
-- Project documentation
-- Clear setup guidance
-- Usage notes
-- Extensible structure for future updates
+- Python 3.11+
+- Docker (optional, for container deployment)
 
-## Getting Started
-
-### Prerequisites
-
-Add any required tools, runtimes, or dependencies here.
-
-### Installation
+## Install
 
 ```bash
-# Add installation steps here
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
 ```
 
-### Running the Software
+Optional ML stack (TensorFlow):
 
 ```bash
-# Add run commands here
+pip install -r requirements-ml.txt
 ```
 
-## Usage
+## Configure
 
-Explain the main ways to use the software here. Include examples if possible.
+Copy `.env.example` to `.env` and set at minimum:
+
+```bash
+cp .env.example .env
+# Required: APP_ENV=development | staging | production
+# Optional: API_KEY=<secret> to enable endpoint authentication
+```
+
+## Run
+
+```bash
+APP_ENV=development uvicorn app.main:app --reload
+```
+
+Or with Docker Compose:
+
+```bash
+docker compose up --build
+```
+
+## Test
+
+```bash
+APP_ENV=development python -m pytest tests -q
+```
 
 ## Configuration
 
-Document any configuration files, environment variables, or settings required by the project.
+All settings are in `app/settings.py` and loaded from environment variables.
+See `.env.example` for a full reference.
 
-## Project Structure
+Key variables:
 
-Describe the most important files and directories in the repository.
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `APP_ENV` | ✅ | `development`, `staging`, or `production` |
+| `API_KEY` | No | Enables `X-API-Key` authentication when non-empty |
+| `LOG_LEVEL` | No | Log verbosity (`INFO` default) |
+| `RATE_LIMIT` | No | Rate limit for protected endpoints (`60/minute` default) |
 
-## Contributing
+## CI
 
-1. Create a branch for your changes.
-2. Make your updates.
-3. Test your changes.
-4. Open a pull request.
+GitHub Actions required test workflow: `.github/workflows/tests.yml`
 
-## License
+Runs syntax validation and the pytest suite on Python 3.11 and 3.12.
 
-Add license information here.
+## Release
+
+Changes are documented in `CHANGELOG.md` using the Keep a Changelog format.

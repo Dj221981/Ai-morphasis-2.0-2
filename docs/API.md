@@ -1,156 +1,96 @@
 # API Reference
 
-## Core Modules
+FastAPI application entrypoint: `app/main.py`
+Settings module: `app/settings.py`
 
-### `ai.agents.BaseAgent`
+## Endpoints
 
-Base class for all adaptive agents in the system.
+### `GET /`
+Returns service identity. No authentication required.
 
-#### Methods
-
-**`__init__(name: str, agent_type: str = "base")`**
-- Initialize a new agent
-- Parameters:
-  - `name`: Unique identifier for the agent
-  - `agent_type`: Type of agent (default: "base")
-
-**`execute_action(action: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]`**
-- Execute an action in the environment
-- Parameters:
-  - `action`: Name of the action to execute
-  - `params`: Optional parameters for the action
-- Returns: Dictionary with action result
-
-**`learn(experience: Dict[str, Any]) -> None`**
-- Process experience and update knowledge
-- Parameters:
-  - `experience`: Dictionary containing experience data
-
-**`get_state() -> Dict[str, Any]`**
-- Get current agent state
-- Returns: State dictionary
-
-**`reset() -> None`**
-- Reset agent to initial state
-
-#### Properties
-
-- `name`: Get agent name
-- `agent_id`: Get unique agent ID
-
-#### Example
-
-```python
-from ai.agents import BaseAgent
-
-# Create an agent
-agent = BaseAgent(name="MyAgent")
-
-# Execute an action
-result = agent.execute_action("move", {"direction": "north", "distance": 10})
-
-# Learn from experience
-agent.learn({"observation": "wall_detected", "reward": -1})
-
-# Get current state
-state = agent.get_state()
-
-# Reset agent
-agent.reset()
+```json
+{"message": "Ai-morphasis 2.0-2 API is running"}
 ```
 
-## Configuration
+### `GET /health`
+Liveness probe. No authentication required. Always returns 200 when the process is alive.
 
-### `config.Settings`
-
-Application-wide settings using Pydantic.
-
-#### Configuration Options
-
-```python
-# App Info
-app_name: str = "Ai-morphasis"
-version: str = "2.0.2"
-debug: bool = False
-
-# Agent Configuration
-max_agents: int = 100
-agent_memory_size: int = 10000
-
-# Game Configuration
-game_width: int = 1280
-game_height: int = 720
-target_fps: int = 60
-
-# Model Configuration
-model_device: str = "cpu"  # cpu or cuda
-batch_size: int = 32
-learning_rate: float = 0.001
-
-# Logging
-log_level: str = "INFO"
-log_file: Optional[str] = "logs/ai_morphasis.log"
+```json
+{"status": "ok", "service": "api", "version": "0.2.0"}
 ```
 
-#### Usage
+### `GET /ready`
+Readiness probe. No authentication required.
 
-```python
-from config import Settings
+Returns `ready` when all required environment variables are set and valid.
+Returns `degraded` with a detail message when required variables are missing.
 
-config = Settings()
-print(f"Running {config.app_name} v{config.version}")
-print(f"Using device: {config.model_device}")
+```json
+{"status": "ready", "detail": "All runtime checks passed"}
 ```
 
-## Testing
+### `GET /configs`
+Returns available model configuration presets from `src/config/model_config.py`.
 
-### Fixtures
+**Authentication:** required when `API_KEY` env var is set — pass value in `X-API-Key` header.
 
-All pytest fixtures are defined in `tests/conftest.py`:
+**Rate limited:** 60 requests/minute per IP by default (configurable via `RATE_LIMIT` env var).
 
-- `sample_agent`: Pre-configured test agent
-- `test_config`: Test configuration
-
-### Running Tests
-
-```bash
-# Run all tests
-pytest tests/ -v
-
-# Run with coverage
-pytest tests/ --cov=src --cov-report=html
-
-# Run specific test file
-pytest tests/test_base_agent.py -v
-
-# Run specific test
-pytest tests/test_base_agent.py::TestBaseAgentInitialization::test_agent_creation -v
-
-# Run with markers
-pytest tests/ -m "unit"
+```json
+{"available_configs": ["dqn", "policy", "small", "large", "continuous", "multi_agent"]}
 ```
-
-## Logging
-
-The application uses `loguru` for logging:
-
-```python
-from loguru import logger
-
-logger.info("Information message")
-logger.debug("Debug message")
-logger.warning("Warning message")
-logger.error("Error message")
-logger.critical("Critical message")
-```
-
-Logs are written to:
-- Console (stdout)
-- File: `logs/ai_morphasis.log` (with rotation)
 
 ---
 
-**For more information, see:**
-- [Architecture Guide](ARCHITECTURE.md)
-- [Contributing Guide](CONTRIBUTING.md)
-- [README](README.md)
+## Authentication
+
+When `API_KEY` is configured, protected endpoints require the `X-API-Key` request header.
+
+| Condition | Response |
+|-----------|----------|
+| No key set (empty `API_KEY`) | Auth disabled, all requests allowed |
+| Correct key in header | `200 OK` |
+| Missing or wrong key | `401 Unauthorized` |
+
+---
+
+## Rate limiting
+
+Protected endpoints are rate limited per client IP using slowapi.
+
+| Condition | Response |
+|-----------|----------|
+| Under limit | Normal response |
+| Limit exceeded | `429 Too Many Requests` |
+
+---
+
+## Error handling
+
+| Condition | Status | Body |
+|-----------|--------|------|
+| Auth failure | `401` | `{"detail": "Invalid or missing API key."}` |
+| Rate limit exceeded | `429` | `{"detail": "Rate limit exceeded. Please slow down."}` |
+| Unhandled exception | `500` | `{"detail": "Internal server error"}` |
+
+---
+
+## Security headers
+
+All responses include:
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY`
+- `Cache-Control: no-store`
+
+---
+
+## Configuration reference
+
+See `app/settings.py` for the full Settings model and `docs/` for additional guides.
+
+## Testing
+
+```bash
+APP_ENV=development python -m pytest tests -q
+```
+
