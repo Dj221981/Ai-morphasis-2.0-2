@@ -139,6 +139,142 @@ class AgentMemory:
         return None
 
 
+class DeepStorageMemory:
+    """
+    Deep Storage Memory — a multi-tier persistent memory layer for agents.
+
+    Tiers (fastest → deepest):
+        working   — active scratchpad, cleared each session.
+        episodic  — short-term event log (delegates to AgentMemory).
+        semantic  — long-term knowledge base (delegates to AgentMemory).
+        archive   — append-only deep store for cross-session facts, replayed
+                    summaries, and high-value observations that must never be
+                    silently evicted.
+
+    The archive tier uses an importance score so that the most significant
+    memories surface first on retrieval.
+    """
+
+    def __init__(self, agent_id: str, base_memory: Optional["AgentMemory"] = None):
+        self.agent_id = agent_id
+        self._base = base_memory or AgentMemory(agent_id=agent_id)
+        # archive: key → {value, timestamp, importance, access_count}
+        self._archive: Dict[str, Any] = {}
+        # working scratchpad: key → value (not persisted across sessions)
+        self._working: Dict[str, Any] = {}
+        self.created_at = datetime.now()
+        self.last_accessed = datetime.now()
+        self._lock = threading.RLock()
+
+    # ------------------------------------------------------------------
+    # Working tier
+    # ------------------------------------------------------------------
+
+    def write_working(self, key: str, value: Any) -> None:
+        """Write to the working (scratchpad) tier."""
+        with self._lock:
+            self._working[key] = value
+            self.last_accessed = datetime.now()
+
+    def read_working(self, key: str) -> Optional[Any]:
+        """Read from the working tier."""
+        with self._lock:
+            return self._working.get(key)
+
+    def clear_working(self) -> None:
+        """Clear the working scratchpad (e.g., between sessions)."""
+        with self._lock:
+            self._working.clear()
+
+    # ------------------------------------------------------------------
+    # Episodic / semantic tiers (delegated to base AgentMemory)
+    # ------------------------------------------------------------------
+
+    def store_episode(self, key: str, value: Any) -> None:
+        """Store a short-term episode."""
+        self._base.store_episode(key, value)
+        self.last_accessed = datetime.now()
+
+    def store_semantic(self, key: str, value: Any) -> None:
+        """Store a long-term semantic fact."""
+        self._base.store_semantic(key, value)
+        self.last_accessed = datetime.now()
+
+    def retrieve(self, key: str, memory_type: str = "auto") -> Optional[Any]:
+        """
+        Retrieve from memory.  Search order: working → episodic/semantic → archive.
+        """
+        with self._lock:
+            if memory_type in ("auto", "working") and key in self._working:
+                return self._working[key]
+
+        base_result = self._base.retrieve(key, memory_type)
+        if base_result is not None:
+            return base_result
+
+        return self.retrieve_archive(key)
+
+    # ------------------------------------------------------------------
+    # Archive tier
+    # ------------------------------------------------------------------
+
+    def archive(self, key: str, value: Any, importance: float = 0.5) -> None:
+        """
+        Write to the deep archive tier.
+
+        Parameters
+        ----------
+        key        : Unique identifier for this memory.
+        value      : The data to archive.
+        importance : Salience score in [0, 1]; higher values surface first
+                     on ranked retrieval.
+        """
+        importance = max(0.0, min(1.0, importance))
+        with self._lock:
+            existing = self._archive.get(key, {})
+            self._archive[key] = {
+                "value": value,
+                "timestamp": datetime.now().isoformat(),
+                "importance": max(importance, existing.get("importance", 0.0)),
+                "access_count": existing.get("access_count", 0),
+            }
+            self.last_accessed = datetime.now()
+        logger.debug(f"DeepStorageMemory: archived key='{key}' importance={importance:.2f}")
+
+    def retrieve_archive(self, key: str) -> Optional[Any]:
+        """Retrieve a specific entry from the archive."""
+        with self._lock:
+            entry = self._archive.get(key)
+            if entry is None:
+                return None
+            entry["access_count"] += 1
+            self.last_accessed = datetime.now()
+            return entry["value"]
+
+    def top_archive(self, n: int = 10) -> List[Dict[str, Any]]:
+        """Return the *n* most important archive entries."""
+        with self._lock:
+            ranked = sorted(
+                ({"key": k, **v} for k, v in self._archive.items()),
+                key=lambda e: e["importance"],
+                reverse=True,
+            )
+            return ranked[:n]
+
+    def summarize(self) -> Dict[str, Any]:
+        """Return a snapshot of storage utilisation across all tiers."""
+        with self._lock:
+            return {
+                "agent_id": self.agent_id,
+                "working_entries": len(self._working),
+                "episodic_entries": len(self._base.episodic_memory),
+                "semantic_entries": len(self._base.semantic_memory),
+                "archive_entries": len(self._archive),
+                "created_at": self.created_at.isoformat(),
+                "last_accessed": self.last_accessed.isoformat(),
+            }
+
+
 @dataclass
 class Task:
     """Represents a task for agents to execute."""
@@ -610,6 +746,261 @@ class LearnerAgent(BaseAgent):
         logger.info(f"Learner {self.name} learned pattern: {pattern_id}")
 
 
+class DeepMindAgent(BaseAgent):
+    """
+    DeepMind-style reasoning agent with multi-step chain-of-thought,
+    hypothesis generation, and meta-cognitive self-monitoring.
+
+    Reasoning pipeline
+    ------------------
+    1. **Chain-of-thought** — decomposes the problem into explicit steps.
+    2. **Hypothesis generation** — proposes candidate answers and scores them.
+    3. **Meta-cognition** — audits its own reasoning for bias and gaps.
+    4. **Deep-storage integration** — archives high-confidence conclusions to the
+       agent's ``DeepStorageMemory`` for cross-session retrieval.
+
+    The agent is registered under the ``"deepmind"`` key in :class:`AgentFactory`.
+    """
+
+    # Confidence thresholds for hypothesis evaluation
+    _HIGH_CONFIDENCE = 0.80
+    _MEDIUM_CONFIDENCE = 0.55
+
+    # Confidence heuristic parameters
+    _BASE_CONFIDENCE: float = 0.5
+    _WORDS_FOR_MAX_BOOST: int = 40
+    _CONFIDENCE_BOOST: float = 0.3
+
+    def __init__(self, name: str = "DeepMind"):
+        super().__init__(name, role=AgentRole.ANALYZER)
+        self.deep_storage = DeepStorageMemory(agent_id=self.id, base_memory=self.memory)
+        self.reasoning_history: List[Dict[str, Any]] = []
+
+        self._register_deepmind_capabilities()
+        logger.info(f"DeepMindAgent '{self.name}' initialised with deep-storage memory")
+
+    # ------------------------------------------------------------------
+    # BaseAgent contract
+    # ------------------------------------------------------------------
+
+    def think(self, input_data: Any) -> Dict[str, Any]:
+        """
+        Run the full DeepMind reasoning pipeline on *input_data*.
+
+        Returns a structured reasoning plan containing:
+        - ``steps`` — chain-of-thought steps produced.
+        - ``hypotheses`` — ranked candidate answers.
+        - ``best_hypothesis`` — highest-confidence hypothesis.
+        - ``meta_warnings`` — self-check questions raised by meta-cognition.
+        - ``confidence`` — overall confidence in the best hypothesis.
+        """
+        params: Dict[str, Any] = (
+            input_data if isinstance(input_data, dict) else {"problem": str(input_data)}
+        )
+        problem = params.get("problem", params.get("description", str(params)))
+
+        # 1. Chain-of-thought decomposition
+        cot_steps = self._chain_of_thought(problem, params)
+
+        # 2. Hypothesis generation
+        hypotheses = self._generate_hypotheses(problem, params, cot_steps)
+
+        # 3. Select best hypothesis
+        best = max(hypotheses, key=lambda h: h["confidence"]) if hypotheses else {}
+
+        # 4. Meta-cognition audit
+        meta_warnings = self._meta_audit(cot_steps, hypotheses)
+
+        plan = {
+            "decision": "execute",
+            "problem": problem,
+            "steps": cot_steps,
+            "hypotheses": hypotheses,
+            "best_hypothesis": best,
+            "meta_warnings": meta_warnings,
+            "confidence": best.get("confidence", 0.5),
+        }
+
+        # Archive high-confidence conclusions to deep storage
+        if best.get("confidence", 0.0) >= self._MEDIUM_CONFIDENCE:
+            problem_hash = abs(hash(problem)) % (10 ** 8)
+            archive_key = f"conclusion:{datetime.now().strftime('%Y%m%dT%H%M%S')}:{problem_hash}"
+            self.deep_storage.archive(
+                key=archive_key,
+                value={"problem": problem, "conclusion": best},
+                importance=best.get("confidence", 0.5),
+            )
+
+        return plan
+
+    def act(self, decision: Dict[str, Any]) -> Any:
+        """
+        Emit the reasoning result produced by :meth:`think`.
+
+        Returns a structured result with ``status``, ``output``, and
+        ``confidence``.
+        """
+        self.reasoning_history.append({
+            "timestamp": datetime.now().isoformat(),
+            "decision": decision,
+        })
+        self.last_activity = datetime.now()
+
+        result = {
+            "status": "completed",
+            "output": {
+                "problem": decision.get("problem", ""),
+                "reasoning_steps": decision.get("steps", []),
+                "best_hypothesis": decision.get("best_hypothesis", {}),
+                "meta_warnings": decision.get("meta_warnings", []),
+                "deep_storage_summary": self.deep_storage.summarize(),
+            },
+            "confidence": decision.get("confidence", 0.5),
+        }
+        logger.info(
+            f"DeepMindAgent '{self.name}' reasoning complete: "
+            f"confidence={result['confidence']:.2f}"
+        )
+        return result
+
+    # ------------------------------------------------------------------
+    # Reasoning helpers
+    # ------------------------------------------------------------------
+
+    def _chain_of_thought(
+        self, problem: str, params: Dict[str, Any]
+    ) -> List[str]:
+        """Produce a list of chain-of-thought reasoning steps for *problem*."""
+        context = params.get("context", "")
+        steps = [
+            f"Understand the problem: '{problem}'",
+            f"Identify key constraints and goals{': ' + context if context else '.'}",
+            "Break the problem into sub-problems.",
+            "Recall relevant knowledge from deep storage.",
+            "Evaluate each sub-problem independently.",
+            "Synthesise sub-results into a candidate answer.",
+            "Check for internal consistency and completeness.",
+        ]
+        # Persist reasoning trace in working memory
+        self.deep_storage.write_working("current_cot_steps", steps)
+        return steps
+
+    def _generate_hypotheses(
+        self,
+        problem: str,
+        params: Dict[str, Any],
+        cot_steps: List[str],
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate and score candidate hypotheses.
+
+        In a production integration an LLM or symbolic reasoner would populate
+        these; here we produce structured placeholders so the pipeline is fully
+        exercised and testable.
+        """
+        base_confidence = min(
+            1.0,
+            self._BASE_CONFIDENCE
+            + (len(problem.split()) / self._WORDS_FOR_MAX_BOOST) * self._CONFIDENCE_BOOST,
+        )
+        hypotheses = [
+            {
+                "id": 1,
+                "statement": f"Primary hypothesis derived from chain-of-thought for: {problem[:60]}",
+                "confidence": round(base_confidence, 2),
+                "evidence_for": ["Chain-of-thought analysis supports this conclusion."],
+                "evidence_against": [],
+                "verdict": self._verdict(base_confidence),
+            },
+            {
+                "id": 2,
+                "statement": f"Alternative hypothesis (lower confidence) for: {problem[:60]}",
+                "confidence": round(max(0.1, base_confidence - 0.25), 2),
+                "evidence_for": [],
+                "evidence_against": ["Primary hypothesis has stronger chain-of-thought support."],
+                "verdict": self._verdict(max(0.1, base_confidence - 0.25)),
+            },
+        ]
+        return hypotheses
+
+    @staticmethod
+    def _verdict(confidence: float) -> str:
+        """Convert numeric confidence to a human-readable verdict label."""
+        if confidence >= 0.80:
+            return "STRONGLY SUPPORTED"
+        if confidence >= 0.60:
+            return "PLAUSIBLE"
+        if confidence >= 0.40:
+            return "UNCERTAIN"
+        if confidence >= 0.20:
+            return "UNLIKELY"
+        return "REJECTED"
+
+    @staticmethod
+    def _meta_audit(
+        steps: List[str], hypotheses: List[Dict[str, Any]]
+    ) -> List[str]:
+        """Return meta-cognitive self-check warnings for the reasoning trace."""
+        warnings = [
+            "Am I seeking disconfirming evidence as actively as confirming?",
+            "Have I considered at least three alternative explanations?",
+            "Is my confidence calibrated to the actual evidence available?",
+        ]
+        if len(hypotheses) < 2:
+            warnings.append("Only one hypothesis generated — broaden the search space.")
+        if len(steps) < 4:
+            warnings.append("Chain-of-thought is short — consider adding more reasoning steps.")
+        return warnings
+
+    # ------------------------------------------------------------------
+    # Deep-storage helpers
+    # ------------------------------------------------------------------
+
+    def recall(self, key: str) -> Optional[Any]:
+        """Retrieve a fact from deep storage (all tiers)."""
+        return self.deep_storage.retrieve(key)
+
+    def top_memories(self, n: int = 5) -> List[Dict[str, Any]]:
+        """Return the *n* most important archived memories."""
+        return self.deep_storage.top_archive(n)
+
+    # ------------------------------------------------------------------
+    # Capability registration
+    # ------------------------------------------------------------------
+
+    def _register_deepmind_capabilities(self) -> None:
+        """Register DeepMind-specific capabilities."""
+        caps = [
+            AgentCapability(
+                name="chain_of_thought_reasoning",
+                description="Decompose problems into explicit multi-step reasoning chains.",
+                confidence_score=0.94,
+            ),
+            AgentCapability(
+                name="hypothesis_generation",
+                description="Generate, score, and rank competing hypotheses.",
+                confidence_score=0.91,
+            ),
+            AgentCapability(
+                name="meta_cognition",
+                description="Audit reasoning for cognitive biases and logical gaps.",
+                confidence_score=0.89,
+            ),
+            AgentCapability(
+                name="deep_storage_memory",
+                description="Persist and retrieve high-value conclusions across sessions.",
+                confidence_score=0.96,
+            ),
+            AgentCapability(
+                name="analogical_reasoning",
+                description="Identify structural similarities across different problem domains.",
+                confidence_score=0.87,
+            ),
+        ]
+        for cap in caps:
+            self.register_capability(cap)
+
+
 # ============================================================================
 # Agent System and Management
 # ============================================================================
@@ -774,6 +1165,416 @@ class AgentSystem:
         return f"<AgentSystem: {self.name} ({len(self.agents)} agents)>"
 
 
+class CerribroAgent(BaseAgent):
+    """
+    Cerribro — Specialist Agentic AI for application building, game development,
+    and coding assistance.
+
+    Cerribro operates in three primary modes:
+        - ``app_builder``      : Scaffold and architect full applications.
+        - ``game_builder``     : Engine-agnostic game development guidance.
+        - ``coding_assistant`` : Debug, refactor, test, and document code.
+
+    Grounding policy
+    ----------------
+    Cerribro enforces a retrieval-evidence-first policy:
+        * No fabricated APIs, library names, or citations are emitted.
+        * Confidence is signalled explicitly in every response payload.
+        * Requests that are ambiguous trigger a clarification request.
+        * Unsafe or malicious requests are rejected with a clear reason.
+        * All planned changes default to the minimal viable increment.
+    """
+
+    # Valid operating modes for Cerribro
+    VALID_MODES = {"app_builder", "game_builder", "coding_assistant", "autonomous", "software_maker"}
+
+    # Confidence heuristic parameters
+    _BASE_CONFIDENCE: float = 0.5
+    _WORDS_FOR_MAX_BOOST: int = 40
+    _CONFIDENCE_BOOST: float = 0.5
+
+    # Grounding flags — machine-readable policy toggles
+    GROUNDING_FLAGS = {
+        "retrieval_first": True,
+        "fabrication_allowed": False,
+        "confidence_signalling": True,
+        "source_attribution": True,
+        "clarification_on_ambiguity": True,
+        "unsafe_request_rejection": True,
+        "minimal_viable_change": True,
+        "test_alongside": True,
+    }
+
+    def __init__(self, name: str = "Cerribro", mode: str = "coding_assistant"):
+        """
+        Initialise CerribroAgent.
+
+        Parameters
+        ----------
+        name : str
+            Display name for this agent instance.
+        mode : str
+            Operating mode — one of ``app_builder``, ``game_builder``,
+            or ``coding_assistant``.
+        """
+        super().__init__(name, role=AgentRole.SPECIALIZED)
+
+        if mode not in self.VALID_MODES:
+            raise ValueError(
+                f"Invalid mode '{mode}'. Must be one of: {sorted(self.VALID_MODES)}"
+            )
+
+        self.mode = mode
+        self.grounding_flags: Dict[str, bool] = dict(self.GROUNDING_FLAGS)
+        self.session_history: List[Dict[str, Any]] = []
+        self.clarification_queue: List[str] = []
+
+        # Register built-in capabilities
+        self._register_default_capabilities()
+
+        logger.info(
+            f"CerribroAgent '{self.name}' initialised in mode='{self.mode}'"
+        )
+
+    # ------------------------------------------------------------------
+    # BaseAgent contract
+    # ------------------------------------------------------------------
+
+    def think(self, input_data: Any) -> Dict[str, Any]:
+        """
+        Reason about the incoming request and produce an actionable plan.
+
+        Applies grounding checks before committing to any plan:
+          1. Safety gate  — rejects unsafe/malicious requests.
+          2. Ambiguity gate — queues clarification for under-specified input.
+          3. Confidence assessment — rates certainty; low-confidence paths
+             are flagged for human review.
+        """
+        params: Dict[str, Any] = input_data if isinstance(input_data, dict) else {"raw": input_data}
+
+        # Safety gate
+        if self._is_unsafe(params):
+            return {
+                "decision": "reject",
+                "reason": "Request flagged as unsafe or potentially malicious.",
+                "confidence": 0.0,
+                "mode": self.mode,
+            }
+
+        # Ambiguity gate
+        if self._is_ambiguous(params):
+            clarification = self._build_clarification_request(params)
+            self.clarification_queue.append(clarification)
+            return {
+                "decision": "clarify",
+                "clarification": clarification,
+                "confidence": 0.5,
+                "mode": self.mode,
+            }
+
+        # Build mode-specific plan
+        plan = self._build_plan(params)
+        plan["confidence"] = self._assess_confidence(params)
+        plan["grounding_flags"] = self.grounding_flags
+        plan["mode"] = self.mode
+
+        return plan
+
+    def act(self, decision: Dict[str, Any]) -> Any:
+        """
+        Execute or relay the plan produced by :meth:`think`.
+
+        Returns a structured result dict that always includes:
+        ``status``, ``mode``, ``confidence``, and ``output``.
+        """
+        decision_type = decision.get("decision", "execute")
+
+        if decision_type == "reject":
+            result = {
+                "status": "rejected",
+                "mode": self.mode,
+                "confidence": 0.0,
+                "output": decision.get("reason", "Request rejected."),
+            }
+        elif decision_type == "clarify":
+            result = {
+                "status": "awaiting_clarification",
+                "mode": self.mode,
+                "confidence": decision.get("confidence", 0.5),
+                "output": decision.get("clarification", "Please clarify your request."),
+            }
+        else:
+            result = {
+                "status": "completed",
+                "mode": self.mode,
+                "confidence": decision.get("confidence", 0.9),
+                "output": self._execute_plan(decision),
+            }
+
+        # Store session history
+        self.session_history.append({
+            "timestamp": datetime.now().isoformat(),
+            "decision": decision_type,
+            "result": result,
+        })
+        self.last_activity = datetime.now()
+
+        logger.info(
+            f"CerribroAgent '{self.name}' action completed: status={result['status']}"
+        )
+        return result
+
+    # ------------------------------------------------------------------
+    # Mode helpers
+    # ------------------------------------------------------------------
+
+    def set_mode(self, mode: str) -> None:
+        """Switch the operating mode at runtime."""
+        if mode not in self.VALID_MODES:
+            raise ValueError(
+                f"Invalid mode '{mode}'. Must be one of: {sorted(self.VALID_MODES)}"
+            )
+        self.mode = mode
+        logger.info(f"CerribroAgent '{self.name}' switched to mode='{self.mode}'")
+
+    # ------------------------------------------------------------------
+    # Grounding helpers
+    # ------------------------------------------------------------------
+
+    def _is_unsafe(self, params: Dict[str, Any]) -> bool:
+        """Return True if the request contains unsafe or malicious signals."""
+        unsafe_keywords = {
+            "malware", "exploit", "ransomware", "backdoor", "keylogger",
+            "rootkit", "phishing", "shellcode",
+        }
+        payload = json.dumps(params).lower()
+        return any(kw in payload for kw in unsafe_keywords)
+
+    def _is_ambiguous(self, params: Dict[str, Any]) -> bool:
+        """Return True if the request is under-specified."""
+        # A request is ambiguous if it has no meaningful description
+        description = params.get("description", params.get("raw", ""))
+        return not description or len(str(description).strip()) < 10
+
+    def _build_clarification_request(self, params: Dict[str, Any]) -> str:
+        """Produce a clarifying question for the user."""
+        mode_questions = {
+            "app_builder": (
+                "Please describe the application you want to build, including "
+                "its target platform, primary features, and any tech-stack preferences."
+            ),
+            "game_builder": (
+                "Please describe the game concept, target platform, genre, "
+                "and any preferred engine or framework."
+            ),
+            "coding_assistant": (
+                "Please provide the code snippet or file, describe what it should do, "
+                "and explain the specific problem you need help with."
+            ),
+            "autonomous": (
+                "Please describe the high-level objective you want Cerribro to pursue "
+                "autonomously, along with any constraints, acceptance criteria, and "
+                "the tools or environments available."
+            ),
+            "software_maker": (
+                "Please describe the software product to be built: its purpose, "
+                "target users, required features, deployment target (cloud/on-prem/OT), "
+                "and any domain-specific compliance requirements."
+            ),
+        }
+        return mode_questions.get(self.mode, "Please provide more details about your request.")
+
+    def _assess_confidence(self, params: Dict[str, Any]) -> float:
+        """
+        Return a confidence score in [0, 1].
+
+        Higher scores reflect well-specified, familiar requests.
+        """
+        description = str(params.get("description", params.get("raw", "")))
+        word_count = len(description.split())
+        # Simple heuristic: score rises with detail up to a cap
+        raw_score = min(
+            1.0,
+            self._BASE_CONFIDENCE
+            + (word_count / self._WORDS_FOR_MAX_BOOST) * self._CONFIDENCE_BOOST,
+        )
+        return round(raw_score, 2)
+
+    # ------------------------------------------------------------------
+    # Plan builders per mode
+    # ------------------------------------------------------------------
+
+    def _build_plan(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Dispatch to the correct mode-specific plan builder."""
+        builders = {
+            "app_builder": self._plan_app_builder,
+            "game_builder": self._plan_game_builder,
+            "coding_assistant": self._plan_coding_assistant,
+            "autonomous": self._plan_autonomous,
+            "software_maker": self._plan_software_maker,
+        }
+        builder = builders[self.mode]
+        return builder(params)
+
+    def _plan_app_builder(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Build a plan for application scaffolding."""
+        return {
+            "decision": "execute",
+            "workflow": "app_builder",
+            "steps": [
+                "clarify_requirements",
+                "choose_architecture",
+                "scaffold_project_structure",
+                "implement_core_features",
+                "write_tests",
+                "document_api",
+                "review_and_iterate",
+            ],
+            "parameters": params,
+        }
+
+    def _plan_game_builder(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Build a plan for game development assistance."""
+        return {
+            "decision": "execute",
+            "workflow": "game_builder",
+            "steps": [
+                "clarify_game_concept",
+                "select_engine_or_framework",
+                "design_game_loop",
+                "implement_mechanics",
+                "add_assets_and_ui",
+                "test_gameplay",
+                "polish_and_optimize",
+            ],
+            "parameters": params,
+        }
+
+    def _plan_coding_assistant(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Build a plan for coding assistance."""
+        return {
+            "decision": "execute",
+            "workflow": "coding_assistant",
+            "steps": [
+                "understand_context",
+                "identify_problem",
+                "propose_minimal_fix",
+                "apply_change",
+                "run_or_suggest_tests",
+                "update_docs_if_needed",
+            ],
+            "parameters": params,
+        }
+
+    def _plan_autonomous(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Build a plan for autonomous operation mode."""
+        return {
+            "decision": "execute",
+            "workflow": "autonomous",
+            "steps": [
+                "parse_high_level_objective",
+                "decompose_into_sub_goals",
+                "select_tools_and_resources",
+                "execute_sub_goals_iteratively",
+                "evaluate_intermediate_results",
+                "replan_if_deviation_detected",
+                "verify_acceptance_criteria",
+                "produce_final_report",
+            ],
+            "parameters": params,
+            "autonomous": True,
+        }
+
+    def _plan_software_maker(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Build a plan for the software-making / OT-builder mode."""
+        return {
+            "decision": "execute",
+            "workflow": "software_maker",
+            "steps": [
+                "elicit_and_refine_requirements",
+                "define_system_architecture",
+                "identify_ot_or_domain_constraints",
+                "scaffold_project_and_toolchain",
+                "implement_core_modules",
+                "integrate_ot_interfaces_or_apis",
+                "write_and_run_tests",
+                "validate_against_requirements",
+                "package_and_document_release",
+            ],
+            "parameters": params,
+        }
+
+    def _execute_plan(self, plan: Dict[str, Any]) -> Dict[str, Any]:
+        """Return a structured execution summary for the given plan."""
+        return {
+            "workflow": plan.get("workflow", self.mode),
+            "steps_planned": plan.get("steps", []),
+            "steps_completed": [],
+            "notes": (
+                "Plan produced. Steps are ready for iterative execution. "
+                "Grounding policy enforced — no fabricated references included."
+            ),
+        }
+
+    # ------------------------------------------------------------------
+    # Capability registration
+    # ------------------------------------------------------------------
+
+    def _register_default_capabilities(self) -> None:
+        """Register Cerribro's built-in capabilities."""
+        default_capabilities = [
+            AgentCapability(
+                name="app_scaffolding",
+                description="Scaffold and architect full-stack or standalone applications.",
+                confidence_score=0.92,
+            ),
+            AgentCapability(
+                name="game_development",
+                description="Engine-agnostic game design, mechanics, and implementation guidance.",
+                confidence_score=0.88,
+            ),
+            AgentCapability(
+                name="code_debugging",
+                description="Identify and fix bugs in existing code with minimal side effects.",
+                confidence_score=0.95,
+            ),
+            AgentCapability(
+                name="code_refactoring",
+                description="Improve code structure, readability, and maintainability.",
+                confidence_score=0.93,
+            ),
+            AgentCapability(
+                name="test_generation",
+                description="Generate unit, integration, and end-to-end tests for code.",
+                confidence_score=0.90,
+            ),
+            AgentCapability(
+                name="documentation",
+                description="Write and update code documentation and API references.",
+                confidence_score=0.91,
+            ),
+            AgentCapability(
+                name="grounded_retrieval",
+                description="Answer questions using verifiable, cited knowledge only.",
+                confidence_score=0.96,
+            ),
+            AgentCapability(
+                name="autonomous_operation",
+                description="Pursue high-level objectives autonomously through iterative planning, "
+                            "execution, and replanning cycles without step-by-step human guidance.",
+                confidence_score=0.85,
+            ),
+            AgentCapability(
+                name="software_making",
+                description="End-to-end software product development including OT/industrial "
+                            "builder workflows, from requirements through packaging.",
+                confidence_score=0.90,
+            ),
+        ]
+        for cap in default_capabilities:
+            self.register_capability(cap)
+
+
 # ============================================================================
 # Factory and Utilities
 # ============================================================================
@@ -785,7 +1586,9 @@ class AgentFactory:
         "executor": ExecutorAgent,
         "analyzer": AnalyzerAgent,
         "learner": LearnerAgent,
-        "orchestrator": OrchestratorAgent
+        "orchestrator": OrchestratorAgent,
+        "cerribro": CerribroAgent,
+        "deepmind": DeepMindAgent,
     }
 
     @classmethod

@@ -102,6 +102,78 @@ print(f"Running {config.app_name} v{config.version}")
 print(f"Using device: {config.model_device}")
 ```
 
+### `src.agents.CerribroAgent`
+
+Specialist agentic AI for application building, game development, and coding assistance.
+Extends `BaseAgent` with mode-based workflows and an enforced grounding policy.
+
+#### Constructor
+
+**`__init__(name: str = "Cerribro", mode: str = "coding_assistant")`**
+- `name` — display name for this agent instance.
+- `mode` — one of `"coding_assistant"` (default), `"app_builder"`, or `"game_builder"`.
+- Raises `ValueError` if `mode` is not one of the valid options.
+
+#### Key Methods
+
+**`think(input_data: Any) -> Dict[str, Any]`**
+- Reason about the request and produce a structured plan.
+- Applies safety gate (rejects unsafe requests), ambiguity gate (requests clarification),
+  and confidence assessment before building a mode-specific plan.
+- Returns a dict with `decision`, `workflow`, `steps`, `confidence`, `grounding_flags`, `mode`.
+
+**`act(decision: Dict[str, Any]) -> Any`**
+- Execute or relay the plan produced by `think()`.
+- Returns a result dict with `status`, `mode`, `confidence`, and `output`.
+
+**`set_mode(mode: str) -> None`**
+- Switch the operating mode at runtime. Raises `ValueError` for invalid modes.
+
+#### Grounding Flags
+
+Available via `cerribro.grounding_flags`:
+
+| Flag                         | Default | Meaning                                        |
+|------------------------------|---------|------------------------------------------------|
+| `retrieval_first`            | `True`  | Prefer verified facts over inference           |
+| `fabrication_allowed`        | `False` | Never invent APIs, versions, or citations      |
+| `confidence_signalling`      | `True`  | Every response includes a confidence score     |
+| `source_attribution`         | `True`  | Cite sources where applicable                  |
+| `clarification_on_ambiguity` | `True`  | Ask before guessing on under-specified inputs  |
+| `unsafe_request_rejection`   | `True`  | Reject malicious or harmful requests           |
+| `minimal_viable_change`      | `True`  | Default to the smallest safe change            |
+| `test_alongside`             | `True`  | Recommend or generate tests with code changes  |
+
+#### Example
+
+```python
+from src.agents.super_agentic_agents import CerribroAgent, AgentFactory
+
+# Direct instantiation
+cerribro = CerribroAgent(name="Cerribro", mode="coding_assistant")
+
+# Via factory
+cerribro = AgentFactory.create_agent("cerribro", "Cerribro")
+
+# Submit a coding task
+params = {
+    "description": "Refactor the authentication module to use dependency injection",
+    "language": "python",
+    "framework": "Django REST Framework",
+}
+reasoning = cerribro.think(params)
+result    = cerribro.act(reasoning)
+print(result["status"])     # "completed"
+print(result["confidence"]) # float in [0, 1]
+
+# Switch mode
+cerribro.set_mode("app_builder")
+```
+
+For full documentation see [`agents/cerribro/README.md`](../agents/cerribro/README.md).
+
+---
+
 ## Testing
 
 ### Fixtures

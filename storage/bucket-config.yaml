@@ -75,6 +75,44 @@ buckets:
       purpose: "agent-backup"
       managed_by: "ai-morphasis"
 
+  # Deep storage for high-value cross-session agent conclusions
+  agent_deep_storage:
+    name: "ai-morphasis-agent-deep-storage"
+    type: "deep_storage"
+    description: >
+      Persistent multi-tier memory store for DeepMindAgent and any agent using
+      DeepStorageMemory. Holds high-importance archived conclusions, reasoning
+      traces, and semantic knowledge that must survive across sessions.
+    retention_days: 3650  # 10 years
+    versioning: true
+    encryption: true
+    replicas: 3
+    access_level: "restricted"
+    storage_class: "intelligent_tiering"
+    regions:
+      - "us-east-1"
+      - "eu-west-1"
+    tags:
+      environment: "production"
+      purpose: "agent-deep-storage"
+      managed_by: "ai-morphasis"
+    tiers:
+      - name: "working"
+        description: "Active scratchpad — cleared each session"
+        storage_class: "standard"
+      - name: "episodic"
+        description: "Short-term event log — 30-day hot storage"
+        storage_class: "standard_ia"
+        retention_days: 30
+      - name: "semantic"
+        description: "Long-term knowledge base — 1-year standard storage"
+        storage_class: "standard"
+        retention_days: 365
+      - name: "archive"
+        description: "Append-only deep archive — importance-ranked, 10-year retention"
+        storage_class: "glacier_instant_retrieval"
+        retention_days: 3650
+
   # Agent-specific memory buckets
   agent_specific:
     - name: "ai-morphasis-reasoning-agent"

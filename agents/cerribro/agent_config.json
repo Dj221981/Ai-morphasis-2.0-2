@@ -1,0 +1,100 @@
+{
+  "agent": {
+    "name": "Cerribro",
+    "version": "1.1.0",
+    "description": "Specialist agentic AI for application building, game development, coding assistance, software making / OT builder, and autonomous operation.",
+    "role": "specialized",
+    "default_mode": "coding_assistant",
+    "valid_modes": ["app_builder", "game_builder", "coding_assistant", "autonomous", "software_maker"]
+  },
+
+  "grounding": {
+    "retrieval_first": true,
+    "fabrication_allowed": false,
+    "confidence_signalling": true,
+    "source_attribution": true,
+    "clarification_on_ambiguity": true,
+    "ambiguity_min_description_length": 10,
+    "unsafe_request_rejection": true,
+    "unsafe_keywords": [
+      "malware", "exploit", "ransomware", "backdoor",
+      "keylogger", "rootkit", "phishing", "shellcode"
+    ],
+    "minimal_viable_change": true,
+    "test_alongside": true
+  },
+
+  "capabilities": {
+    "app_scaffolding": {
+      "description": "Scaffold and architect full-stack or standalone applications.",
+      "confidence_score": 0.92,
+      "enabled": true
+    },
+    "game_development": {
+      "description": "Engine-agnostic game design, mechanics, and implementation guidance.",
+      "confidence_score": 0.88,
+      "enabled": true
+    },
+    "code_debugging": {
+      "description": "Identify and fix bugs in existing code with minimal side effects.",
+      "confidence_score": 0.95,
+      "enabled": true
+    },
+    "code_refactoring": {
+      "description": "Improve code structure, readability, and maintainability.",
+      "confidence_score": 0.93,
+      "enabled": true
+    },
+    "test_generation": {
+      "description": "Generate unit, integration, and end-to-end tests for code.",
+      "confidence_score": 0.90,
+      "enabled": true
+    },
+    "documentation": {
+      "description": "Write and update code documentation and API references.",
+      "confidence_score": 0.91,
+      "enabled": true
+    },
+    "grounded_retrieval": {
+      "description": "Answer questions using verifiable, cited knowledge only.",
+      "confidence_score": 0.96,
+      "enabled": true
+    },
+    "autonomous_operation": {
+      "description": "Pursue high-level objectives autonomously through iterative planning, execution, and replanning cycles without step-by-step human guidance.",
+      "confidence_score": 0.85,
+      "enabled": true
+    },
+    "software_making": {
+      "description": "End-to-end software product development including OT/industrial builder workflows, from requirements through packaging.",
+      "confidence_score": 0.90,
+      "enabled": true
+    }
+  },
+
+  "autonomous_mode": {
+    "max_autonomous_iterations": 20,
+    "replan_on_deviation": true,
+    "human_checkpoint_interval": 5,
+    "abort_on_unsafe_action": true,
+    "confidence_threshold_to_proceed": 0.70
+  },
+
+  "software_maker": {
+    "supported_deployment_targets": ["cloud", "on-prem", "ot", "edge"],
+    "ot_compliance_check": true,
+    "default_toolchain": "auto"
+  },
+
+  "performance": {
+    "max_active_tasks": 10,
+    "max_capabilities": 50,
+    "max_session_history": 500,
+    "confidence_threshold_for_auto_proceed": 0.75
+  },
+
+  "logging": {
+    "level": "INFO",
+    "include_session_history": true
+  }
+}
