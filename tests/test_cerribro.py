@@ -258,8 +258,8 @@ class TestCerribroAct:
         assert len(cerribro_default.session_history) == 1
 
     def test_session_history_accumulates(self, cerribro_default):
-        for i in range(3):
-            params = {"description": f"Task number {i} — refactor module {i} for clarity"}
+        for task_num in range(3):
+            params = {"description": f"Task number {task_num} — refactor module {task_num} for clarity"}
             reasoning = cerribro_default.think(params)
             cerribro_default.act(reasoning)
         assert len(cerribro_default.session_history) == 3

@@ -1027,12 +1027,13 @@ class CerribroAgent(BaseAgent):
                 result["unknowns_and_next_steps"] = decision["unknowns_and_next_steps"]
 
         # Store session history
+        now = datetime.now()
         self.session_history.append({
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": now.isoformat(),
             "decision": decision_type,
             "result": result,
         })
-        self.last_activity = datetime.now()
+        self.last_activity = now
 
         logger.info(
             f"CerribroAgent '{self.name}' action completed: status={result['status']}"
@@ -1197,7 +1198,12 @@ class CerribroAgent(BaseAgent):
         """
         description = str(params.get("description", params.get("raw", "")))
         word_count = len(description.split())
-        complexity = "simple" if word_count < 15 else ("medium" if word_count < 40 else "complex")
+        if word_count < 15:
+            complexity = "simple"
+        elif word_count < 40:
+            complexity = "medium"
+        else:
+            complexity = "complex"
         cfg = self.deep_mode_config["deep_research"]
         min_records = cfg["min_evidence_records"].get(complexity, 2)
 

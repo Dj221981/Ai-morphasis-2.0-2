@@ -1,7 +1,7 @@
 # Cerribro Deep Intelligence Framework
 
 This document specifies the **Deep Intelligence Layer** — a reusable reasoning and
-planning framework that Cerribro applies when `strict_planning_mode` is enabled (see
+planning framework that Cerribro applies when `strict_planning` is enabled (see
 [`agent_config.json`](agent_config.json)).
 
 ---
