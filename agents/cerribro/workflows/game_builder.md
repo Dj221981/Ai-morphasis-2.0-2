@@ -69,7 +69,7 @@ development through to a playable, tested first build.
    - Ensure audio can be muted/controlled by the player.
 
 10. **Polish and optimisation**
-    - Profile for frame-rate issues; optimise draw calls and physics.
+    - Profile for frame-rate issues; optimize draw calls and physics.
     - Tune game-feel (input responsiveness, animation timing, juice).
 
 ---

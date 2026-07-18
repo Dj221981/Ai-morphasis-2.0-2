@@ -1033,7 +1033,7 @@ class CerribroAgent(BaseAgent):
                 "implement_mechanics",
                 "add_assets_and_ui",
                 "test_gameplay",
-                "polish_and_optimise",
+                "polish_and_optimize",
             ],
             "parameters": params,
         }
