@@ -4,18 +4,20 @@ A FastAPI service providing a runtime baseline for AI agent training configurati
 
 ## Current status
 
-**Production-baseline ready** — core API service is runnable, CI is wired, and the configuration registry is stable. The ML model training modules (`src/models/`, `src/data/`, `src/agents/`) are scaffolded but not yet connected to the API surface and are not covered by default CI (they require optional heavy dependencies like TensorFlow).
+**Production-ready baseline** — the API service is fully containerised, CI-wired, rate-limited, CORS-configured, and emits structured JSON logs in staging/production.  All configuration is validated via pydantic-settings.  The ML model training modules (`src/models/`, `src/data/`, `src/agents/`) are scaffolded but not yet connected to the API surface and are not covered by default CI (they require optional heavy dependencies like TensorFlow).
 
 ## Repository layout
 
 ```
 app/          FastAPI application (entry point)
 src/
-  config/     Model configuration registry (importable, tested)
+  config/     Model configuration registry + pydantic-settings (importable, tested)
   models/     TensorFlow neural network models (optional, not wired to API)
   data/       Data preprocessing utilities (optional)
   agents/     Agent orchestration scaffold (optional)
-tests/        pytest test suite (covers app/ and src/config/)
+tests/        pytest test suite (covers app/, src/config/, and production features)
+Dockerfile    Multi-stage production container image
+docker-compose.yml  Local development convenience
 workflows/    Legacy non-functional workflow file (do not use; see .github/workflows/)
 .github/
   workflows/
@@ -35,11 +37,14 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env and set APP_ENV=development (required for /ready probe)
 
-# 3. Run the service
+# 3. Run the service (local Python)
 uvicorn app.main:app --reload
 
+# 3b. Run the service (Docker)
+docker compose up --build
+
 # 4. Run tests
-APP_ENV=test python -m pytest tests -v
+APP_ENV=development python -m pytest tests -v
 ```
 
 ## API endpoints
@@ -66,15 +71,14 @@ No checks are hidden with `|| true`.
 
 ## What is not yet production ready
 
-Even with this baseline, the following gaps remain before calling this fully production ready:
+The following gaps remain before calling this fully production ready:
 
-- **No auth / rate limiting** — the API is open; add authentication if exposed externally.
+- **No auth** — the API is open; add authentication (e.g. API-key header, OAuth2) if exposed externally.
 - **ML modules not wired to API** — `src/models/`, `src/data/`, and `src/agents/` are scaffolded but not integrated into the FastAPI service.
 - **TensorFlow not in requirements** — `src/models/neural_network.py` requires TensorFlow which is an optional dependency; it must be installed separately for ML use.
-- **No deployment contract** — no Dockerfile or production process definition is included.
-- **No observability** — no metrics, tracing, or structured log output contract beyond basic logging.
-- **Shallow readiness probe** — `/ready` only checks env-var presence; extend it for real dependency checks.
-- **No database** — the service is stateless; add persistence layer if required.
+- **No observability** — no distributed tracing (OpenTelemetry) or metrics (Prometheus) endpoint; add these for production monitoring.
+- **Shallow readiness probe** — `/ready` only checks env-var presence; extend it for real dependency checks (database, model weights, downstream services).
+- **No database** — the service is stateless; add a persistence layer if required.
 
 ## Configuration
 

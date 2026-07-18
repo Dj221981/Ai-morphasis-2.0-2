@@ -4,6 +4,10 @@
 
 All endpoints return JSON. Security headers (`X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`) are added to every response.
 
+CORS headers are emitted based on the `CORS_ORIGINS` environment variable (comma-separated list; defaults to `*` in development).
+
+Rate limiting is applied to non-probe endpoints at the rate configured by the `RATE_LIMIT` environment variable (default: `60/minute` per client IP). Responses that exceed the limit return HTTP 429.
+
 ---
 
 ### `GET /`
@@ -85,6 +89,8 @@ Unhandled server errors return HTTP 500:
 ```json
 {"error": "internal_server_error", "detail": "An unexpected error occurred."}
 ```
+
+Rate limit exceeded returns HTTP 429 (handled by slowapi).
 
 ---
 
