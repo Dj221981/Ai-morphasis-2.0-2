@@ -48,7 +48,7 @@ The service starts on `http://127.0.0.1:8000` by default.
 ### Running Tests
 
 ```bash
-APP_ENV=test python -m pytest tests -v
+APP_ENV=development python -m pytest tests -v
 ```
 
 ## Usage
@@ -96,13 +96,14 @@ requirements.txt         Runtime + test dependencies
 
 1. Create a branch for your changes.
 2. Make your updates and add tests.
-3. Run `APP_ENV=test python -m pytest tests -v` to verify.
+3. Run `APP_ENV=development python -m pytest tests -v` to verify.
 4. Open a pull request targeting `main`.
 
 ## What is not yet production ready
 
 - ML modules not wired to API — TensorFlow is an optional dependency; install separately for ML use.
-- No authentication or rate limiting.
+- No authentication — add an API-key or OAuth2 layer if the service is exposed externally.
+- No distributed tracing or metrics endpoint.
 - No deployment contract (Dockerfile, process definition).
 - No observability stack (metrics, tracing).
 - `/ready` only checks env-var presence; extend for full dependency checks.

@@ -2,6 +2,7 @@
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from app.main import app
 from src.config.settings import Settings
@@ -55,7 +56,7 @@ def test_settings_production_app_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_settings_invalid_app_env_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APP_ENV", "invalid_env")
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         Settings()
 
 
@@ -69,8 +70,7 @@ def test_settings_cors_origins_list_multiple() -> None:
         app_env="development",
         cors_origins="http://example.com, https://app.example.com",
     )
-    assert "http://example.com" in s.cors_origins_list
-    assert "https://app.example.com" in s.cors_origins_list
+    assert s.cors_origins_list == ["http://example.com", "https://app.example.com"]
 
 
 def test_settings_json_logs_in_production() -> None:
