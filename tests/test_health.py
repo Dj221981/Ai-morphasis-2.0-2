@@ -18,7 +18,7 @@ def test_health_endpoint() -> None:
     assert response.json() == {"status": "ok", "service": "api", "version": "0.1.0"}
 
 
-def test_ready_endpoint_degraded_without_required_env(monkeypatch) -> None:
+def test_ready_endpoint_degraded_without_required_environment_variables(monkeypatch) -> None:
     monkeypatch.delenv("APP_ENV", raising=False)
 
     response = client.get("/ready")
@@ -30,7 +30,7 @@ def test_ready_endpoint_degraded_without_required_env(monkeypatch) -> None:
     }
 
 
-def test_ready_endpoint_ready_when_required_env_present(monkeypatch) -> None:
+def test_ready_endpoint_ready_when_required_environment_variables_present(monkeypatch) -> None:
     monkeypatch.setenv("APP_ENV", "test")
 
     response = client.get("/ready")
