@@ -49,7 +49,13 @@ LOGGER = logging.getLogger("ai_morphasis_api")
 
 # ── Rate limiter ──────────────────────────────────────────────────────────────
 
-_limiter = Limiter(key_func=lambda request: request.client.host if request.client else "unknown", storage_uri="memory://")
+
+def _get_rate_limit_key(request: Request) -> str:
+    """Return a per-client identifier for rate limiting (client IP address)."""
+    return request.client.host if request.client else "unknown"
+
+
+_limiter = Limiter(key_func=_get_rate_limit_key, storage_uri="memory://")
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
@@ -160,8 +166,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return HealthResponse(status="ok", service="api", version=APP_VERSION)
 
     @app.get("/ready", tags=["meta"])
-    def ready(s: Settings = Depends(get_settings)) -> dict[str, str]:
-        if not s.app_env:
+    def ready(settings: Settings = Depends(get_settings)) -> dict[str, str]:
+        if not settings.app_env:
             return {"status": "degraded", "detail": "APP_ENV not configured"}
         return {"status": "ready", "detail": "All runtime checks passed"}
 
