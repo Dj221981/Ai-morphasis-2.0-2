@@ -1,64 +1,88 @@
-# Hey there! 👋
+# Ai-morphasis 2.0-2
 
-Welcome to my GitHub profile! I'm a **Full-Stack Developer** passionate about creating innovative solutions across the web, cloud infrastructure, and game development. Currently building **Ai-morphasis 2.0**, an ambitious AI-driven project pushing the boundaries of what's possible.
+A FastAPI service providing a runtime baseline for AI agent training configuration and orchestration.
 
-## 🚀 About Me
+## Current status
 
-I thrive on solving complex problems and building scalable, production-grade applications. With a balanced approach to technical excellence and creative problem-solving, I'm driven by the challenge of bringing ideas to life through code.
+**Production-ready baseline** — the API service is fully containerised, CI-wired, rate-limited, CORS-configured, and emits structured JSON logs in staging/production.  All configuration is validated via pydantic-settings.  The ML model training modules (`src/models/`, `src/data/`, `src/agents/`) are scaffolded but not yet connected to the API surface and are not covered by default CI (they require optional heavy dependencies like TensorFlow).
 
-- 🔭 **Currently creating** Ai-morphasis 2.0 — a sophisticated AI system with evolving capabilities
-- 🌱 **Always learning** new architectures, frameworks, and best practices
-- 💡 **Interested in** Full-Stack Development, Cloud Infrastructure, Game Dev, and AI/ML applications
-- 🎮 **Passionate about** building engaging experiences across platforms
-- 💬 **Ask me about** scalable architecture, cloud solutions, game mechanics, or AI implementation
-- 📫 **Let's connect** — reach out via email or social media!
+## Repository layout
 
-## 💻 Tech Stack
+```
+app/          FastAPI application (entry point)
+src/
+  config/     Model configuration registry + pydantic-settings (importable, tested)
+  models/     TensorFlow neural network models (optional, not wired to API)
+  data/       Data preprocessing utilities (optional)
+  agents/     Agent orchestration scaffold (optional)
+tests/        pytest test suite (covers app/, src/config/, and production features)
+Dockerfile    Multi-stage production container image
+docker-compose.yml  Local development convenience
+workflows/    Legacy non-functional workflow file (do not use; see .github/workflows/)
+.github/
+  workflows/
+    tests.yml     Canonical CI — lint + pytest on Python 3.10/3.11/3.12
+    django.yml    Disabled (this repo does not use Django)
+```
 
-- **Languages**: Python, JavaScript/TypeScript, and more
-- **Full-Stack**: Frontend UI → Backend APIs → Database Design
-- **Cloud & Infrastructure**: Deploying and scaling applications in the cloud
-- **Game Development**: Building interactive experiences
-- **AI/ML**: Implementing intelligent systems and algorithms
-- **DevOps & Testing**: GitHub Actions (CI/CD), Docker, pytest, flake8, code coverage tracking
+## Quick start
 
-## 🎯 Featured Work
+```bash
+# 1. Clone and install
+git clone https://github.com/Dj221981/Ai-morphasis-2.0-2.git
+cd Ai-morphasis-2.0-2
+pip install -r requirements.txt
 
-- **[Ai-morphasis 2.0](https://github.com/Dj221981/Ai-morphasis-2.0-2)** — A cutting-edge AI system with comprehensive testing, advanced CI/CD pipelines, and multi-version Python support. Features professional-grade linting, code coverage tracking, and specialized DeepMind tool integration.
+# 2. Configure environment
+cp .env.example .env
+# Edit .env and set APP_ENV=development (required for /ready probe)
 
-## 📊 GitHub Activity
+# 3. Run the service (local Python)
+uvicorn app.main:app --reload
 
-![GitHub Stats](https://github-readme-stats.vercel.app/api?username=Dj221981&show_icons=true&theme=dark)
+# 3b. Run the service (Docker)
+docker compose up --build
 
-![Top Languages](https://github-readme-stats.vercel.app/api/top-langs/?username=Dj221981&layout=compact&theme=dark)
+# 4. Run tests
+APP_ENV=development python -m pytest tests -v
+```
 
-## 🤝 Connect With Me
+## API endpoints
 
-Let's collaborate, discuss tech, or just chat!
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/` | Service info |
+| GET | `/health` | Liveness probe — always 200 if process is alive |
+| GET | `/ready` | Startup readiness check — 200 when `APP_ENV` is set, 503 otherwise |
+| GET | `/configs` | List and return all registered model configurations |
 
-- **Email**: [darrenjris24@gmail.com](mailto:darrenjris24@gmail.com)
-- **Facebook**: [Connect on Facebook](#)
-- **YouTube**: [Subscribe on YouTube](#)
-- **LinkedIn**: [Connect on LinkedIn](#)
+### `/ready` semantics
 
-## 🎮 Current Focus
+`/ready` checks that the `APP_ENV` environment variable is set. This is a *startup* readiness check, not a full dependency probe. It does **not** verify database connectivity, model weights, or downstream service availability. If you need a richer readiness check, extend the `ready()` function in `app/main.py`.
 
-Working on expanding **Ai-morphasis 2.0** with:
-- Enhanced AI capabilities and system architecture
-- Cloud infrastructure optimization
-- Integration with modern frameworks and tools
-- Comprehensive testing and deployment pipelines
-- Game development integrations
+## CI
 
-## 📝 My Approach
+CI runs on every push and pull request to `main` via `.github/workflows/tests.yml`:
 
-I believe in writing clean, maintainable code with solid testing practices. You'll notice my projects emphasize:
-- ✅ Comprehensive test coverage
-- 🔄 Automated CI/CD pipelines
-- 📦 Professional code quality standards
-- 🚀 Scalable architecture
-- 🎯 Production-ready deployments
+- **lint** — `flake8` syntax and undefined-name checks (hard failure)
+- **test** — `pytest` on Python 3.10, 3.11, and 3.12 (hard failure)
 
----
+No checks are hidden with `|| true`.
 
-⭐ **If you find my work interesting, feel free to star a repo or reach out to collaborate!**
+## What is not yet production ready
+
+The following gaps remain before calling this fully production ready:
+
+- **No auth** — the API is open; add authentication (e.g. API-key header, OAuth2) if exposed externally.
+- **ML modules not wired to API** — `src/models/`, `src/data/`, and `src/agents/` are scaffolded but not integrated into the FastAPI service.
+- **TensorFlow not in requirements** — `src/models/neural_network.py` requires TensorFlow which is an optional dependency; it must be installed separately for ML use.
+- **No observability** — no distributed tracing (OpenTelemetry) or metrics (Prometheus) endpoint; add these for production monitoring.
+- **Shallow readiness probe** — `/ready` only checks env-var presence; extend it for real dependency checks (database, model weights, downstream services).
+- **No database** — the service is stateless; add a persistence layer if required.
+
+## Configuration
+
+See `.env.example` for all supported environment variables.
+
+Model configurations are managed in `src/config/model_config.py` and accessible via the `/configs` API endpoint.
+

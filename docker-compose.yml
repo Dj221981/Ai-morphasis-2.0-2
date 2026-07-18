@@ -1,0 +1,46 @@
+# docker-compose.yml — local development convenience
+#
+# Usage:
+#   docker compose up          # start service on http://localhost:8000
+#   docker compose up --build  # rebuild after code changes
+#   docker compose down        # stop and remove containers
+#
+# The 'development' profile mounts the source directory so edits are
+# picked up immediately without a rebuild.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: ai-morphasis:local
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: development
+      LOG_LEVEL: INFO
+      CORS_ORIGINS: "*"
+      RATE_LIMIT: "60/minute"
+      MODEL_DEVICE: cpu
+    volumes:
+      # Mount source code for live reload during development.
+      # Remove this volume in production deployments.
+      - ./app:/app/app:ro
+      - ./src:/app/src:ro
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8000"
+      - --reload
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped

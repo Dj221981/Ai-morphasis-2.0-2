@@ -1,156 +1,132 @@
 # API Reference
 
-## Core Modules
+## HTTP Endpoints
 
-### `ai.agents.BaseAgent`
+All endpoints return JSON. Security headers (`X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`) are added to every response.
 
-Base class for all adaptive agents in the system.
+CORS headers are emitted based on the `CORS_ORIGINS` environment variable (comma-separated list; defaults to `*` in development).
 
-#### Methods
+Rate limiting is applied to non-probe endpoints at the rate configured by the `RATE_LIMIT` environment variable (default: `60/minute` per client IP). Responses that exceed the limit return HTTP 429.
 
-**`__init__(name: str, agent_type: str = "base")`**
-- Initialize a new agent
-- Parameters:
-  - `name`: Unique identifier for the agent
-  - `agent_type`: Type of agent (default: "base")
+---
 
-**`execute_action(action: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]`**
-- Execute an action in the environment
-- Parameters:
-  - `action`: Name of the action to execute
-  - `params`: Optional parameters for the action
-- Returns: Dictionary with action result
+### `GET /`
 
-**`learn(experience: Dict[str, Any]) -> None`**
-- Process experience and update knowledge
-- Parameters:
-  - `experience`: Dictionary containing experience data
+**Service root** — returns the service name and version.
 
-**`get_state() -> Dict[str, Any]`**
-- Get current agent state
-- Returns: State dictionary
+**Response 200**
 
-**`reset() -> None`**
-- Reset agent to initial state
+```json
+{"service": "Ai-morphasis-2.0-2", "version": "2.0.2"}
+```
 
-#### Properties
+---
 
-- `name`: Get agent name
-- `agent_id`: Get unique agent ID
+### `GET /health`
 
-#### Example
+**Liveness probe** — indicates the process is running.
+
+Returns HTTP 200 as long as the application process is alive. Does **not** check downstream dependencies.
+
+**Response 200**
+
+```json
+{"status": "ok"}
+```
+
+---
+
+### `GET /ready`
+
+**Startup readiness check** — verifies that critical runtime configuration is present.
+
+Currently checks that `APP_ENV` is set. Returns HTTP 200 when ready, HTTP 503 when not.
+
+> **Note:** This is a *startup* readiness check, not a full dependency probe. It does not verify database connectivity, model weights, or downstream service availability. Extend the `ready()` function in `app/main.py` to add deeper checks.
+
+**Response 200 — ready**
+
+```json
+{"status": "ready", "env": "development"}
+```
+
+**Response 503 — not ready**
+
+```json
+{
+  "status": "not_ready",
+  "issues": ["APP_ENV is not set"],
+  "note": "Set APP_ENV to 'development', 'staging', or 'production' before sending traffic. See .env.example for guidance."
+}
+```
+
+---
+
+### `GET /configs`
+
+**Model configurations** — returns all registered model training configurations.
+
+Configurations are defined in `src/config/model_config.py` and cover DQN, policy gradient, small, large, continuous, and multi-agent setups.
+
+**Response 200**
+
+```json
+{
+  "available": ["dqn", "policy", "small", "large", "continuous", "multi_agent"],
+  "configs": {
+    "dqn": { "model": {...}, "environment": {...}, "training": {...}, ... },
+    ...
+  }
+}
+```
+
+---
+
+## Error responses
+
+Unhandled server errors return HTTP 500:
+
+```json
+{"error": "internal_server_error", "detail": "An unexpected error occurred."}
+```
+
+Rate limit exceeded returns HTTP 429 (handled by slowapi).
+
+---
+
+## Configuration module
+
+`src/config/model_config` exposes two public functions:
 
 ```python
-from ai.agents import BaseAgent
+from src.config.model_config import get_config, list_configs
 
-# Create an agent
-agent = BaseAgent(name="MyAgent")
+# List available configuration names
+names = list_configs()  # ['dqn', 'policy', 'small', 'large', 'continuous', 'multi_agent']
 
-# Execute an action
-result = agent.execute_action("move", {"direction": "north", "distance": 10})
-
-# Learn from experience
-agent.learn({"observation": "wall_detected", "reward": -1})
-
-# Get current state
-state = agent.get_state()
-
-# Reset agent
-agent.reset()
+# Get a deep copy of a named configuration
+cfg = get_config("dqn")  # raises ValueError for unknown names
 ```
 
-## Configuration
+---
 
-### `config.Settings`
+## Modules not yet in API surface
 
-Application-wide settings using Pydantic.
+The following modules exist in the repository but are **not connected to the API** and are not covered by default CI. They require optional dependencies (TensorFlow, NumPy):
 
-#### Configuration Options
+- `src/models/neural_network.py` — DQN and policy gradient neural network models
+- `src/data/preprocessing.py` — Data normalisation and augmentation utilities
+- `src/agents/super_agentic_agents.py` — Agent orchestration scaffold
 
-```python
-# App Info
-app_name: str = "Ai-morphasis"
-version: str = "2.0.2"
-debug: bool = False
-
-# Agent Configuration
-max_agents: int = 100
-agent_memory_size: int = 10000
-
-# Game Configuration
-game_width: int = 1280
-game_height: int = 720
-target_fps: int = 60
-
-# Model Configuration
-model_device: str = "cpu"  # cpu or cuda
-batch_size: int = 32
-learning_rate: float = 0.001
-
-# Logging
-log_level: str = "INFO"
-log_file: Optional[str] = "logs/ai_morphasis.log"
-```
-
-#### Usage
-
-```python
-from config import Settings
-
-config = Settings()
-print(f"Running {config.app_name} v{config.version}")
-print(f"Using device: {config.model_device}")
-```
-
-## Testing
-
-### Fixtures
-
-All pytest fixtures are defined in `tests/conftest.py`:
-
-- `sample_agent`: Pre-configured test agent
-- `test_config`: Test configuration
-
-### Running Tests
-
-```bash
-# Run all tests
-pytest tests/ -v
-
-# Run with coverage
-pytest tests/ --cov=src --cov-report=html
-
-# Run specific test file
-pytest tests/test_base_agent.py -v
-
-# Run specific test
-pytest tests/test_base_agent.py::TestBaseAgentInitialization::test_agent_creation -v
-
-# Run with markers
-pytest tests/ -m "unit"
-```
+---
 
 ## Logging
 
-The application uses `loguru` for logging:
-
-```python
-from loguru import logger
-
-logger.info("Information message")
-logger.debug("Debug message")
-logger.warning("Warning message")
-logger.error("Error message")
-logger.critical("Critical message")
-```
-
-Logs are written to:
-- Console (stdout)
-- File: `logs/ai_morphasis.log` (with rotation)
+The application uses Python's built-in `logging` module. Set the `LOG_LEVEL` environment variable to control verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`). Default is `INFO`.
 
 ---
 
 **For more information, see:**
-- [Architecture Guide](ARCHITECTURE.md)
-- [Contributing Guide](CONTRIBUTING.md)
-- [README](README.md)
+- [Software.md](../Software.md)
+- [README.md](../README.md)
+
