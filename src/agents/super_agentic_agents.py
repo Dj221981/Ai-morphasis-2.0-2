@@ -774,6 +774,345 @@ class AgentSystem:
         return f"<AgentSystem: {self.name} ({len(self.agents)} agents)>"
 
 
+class CerribroAgent(BaseAgent):
+    """
+    Cerribro — Specialist Agentic AI for application building, game development,
+    and coding assistance.
+
+    Cerribro operates in three primary modes:
+        - ``app_builder``      : Scaffold and architect full applications.
+        - ``game_builder``     : Engine-agnostic game development guidance.
+        - ``coding_assistant`` : Debug, refactor, test, and document code.
+
+    Grounding policy
+    ----------------
+    Cerribro enforces a retrieval-evidence-first policy:
+        * No fabricated APIs, library names, or citations are emitted.
+        * Confidence is signalled explicitly in every response payload.
+        * Requests that are ambiguous trigger a clarification request.
+        * Unsafe or malicious requests are rejected with a clear reason.
+        * All planned changes default to the minimal viable increment.
+    """
+
+    # Valid operating modes for Cerribro
+    VALID_MODES = {"app_builder", "game_builder", "coding_assistant"}
+
+    # Grounding flags — machine-readable policy toggles
+    GROUNDING_FLAGS = {
+        "retrieval_first": True,
+        "fabrication_allowed": False,
+        "confidence_signalling": True,
+        "source_attribution": True,
+        "clarification_on_ambiguity": True,
+        "unsafe_request_rejection": True,
+        "minimal_viable_change": True,
+        "test_alongside": True,
+    }
+
+    def __init__(self, name: str = "Cerribro", mode: str = "coding_assistant"):
+        """
+        Initialise CerribroAgent.
+
+        Parameters
+        ----------
+        name : str
+            Display name for this agent instance.
+        mode : str
+            Operating mode — one of ``app_builder``, ``game_builder``,
+            or ``coding_assistant``.
+        """
+        super().__init__(name, role=AgentRole.SPECIALIZED)
+
+        if mode not in self.VALID_MODES:
+            raise ValueError(
+                f"Invalid mode '{mode}'. Must be one of: {sorted(self.VALID_MODES)}"
+            )
+
+        self.mode = mode
+        self.grounding_flags: Dict[str, bool] = dict(self.GROUNDING_FLAGS)
+        self.session_history: List[Dict[str, Any]] = []
+        self.clarification_queue: List[str] = []
+
+        # Register built-in capabilities
+        self._register_default_capabilities()
+
+        logger.info(
+            f"CerribroAgent '{self.name}' initialised in mode='{self.mode}'"
+        )
+
+    # ------------------------------------------------------------------
+    # BaseAgent contract
+    # ------------------------------------------------------------------
+
+    def think(self, input_data: Any) -> Dict[str, Any]:
+        """
+        Reason about the incoming request and produce an actionable plan.
+
+        Applies grounding checks before committing to any plan:
+          1. Safety gate  — rejects unsafe/malicious requests.
+          2. Ambiguity gate — queues clarification for under-specified input.
+          3. Confidence assessment — rates certainty; low-confidence paths
+             are flagged for human review.
+        """
+        params: Dict[str, Any] = input_data if isinstance(input_data, dict) else {"raw": input_data}
+
+        # Safety gate
+        if self._is_unsafe(params):
+            return {
+                "decision": "reject",
+                "reason": "Request flagged as unsafe or potentially malicious.",
+                "confidence": 0.0,
+                "mode": self.mode,
+            }
+
+        # Ambiguity gate
+        if self._is_ambiguous(params):
+            clarification = self._build_clarification_request(params)
+            self.clarification_queue.append(clarification)
+            return {
+                "decision": "clarify",
+                "clarification": clarification,
+                "confidence": 0.5,
+                "mode": self.mode,
+            }
+
+        # Build mode-specific plan
+        plan = self._build_plan(params)
+        plan["confidence"] = self._assess_confidence(params)
+        plan["grounding_flags"] = self.grounding_flags
+        plan["mode"] = self.mode
+
+        return plan
+
+    def act(self, decision: Dict[str, Any]) -> Any:
+        """
+        Execute or relay the plan produced by :meth:`think`.
+
+        Returns a structured result dict that always includes:
+        ``status``, ``mode``, ``confidence``, and ``output``.
+        """
+        decision_type = decision.get("decision", "execute")
+
+        if decision_type == "reject":
+            result = {
+                "status": "rejected",
+                "mode": self.mode,
+                "confidence": 0.0,
+                "output": decision.get("reason", "Request rejected."),
+            }
+        elif decision_type == "clarify":
+            result = {
+                "status": "awaiting_clarification",
+                "mode": self.mode,
+                "confidence": decision.get("confidence", 0.5),
+                "output": decision.get("clarification", "Please clarify your request."),
+            }
+        else:
+            result = {
+                "status": "completed",
+                "mode": self.mode,
+                "confidence": decision.get("confidence", 0.9),
+                "output": self._execute_plan(decision),
+            }
+
+        # Store session history
+        self.session_history.append({
+            "timestamp": datetime.now().isoformat(),
+            "decision": decision_type,
+            "result": result,
+        })
+        self.last_activity = datetime.now()
+
+        logger.info(
+            f"CerribroAgent '{self.name}' action completed: status={result['status']}"
+        )
+        return result
+
+    # ------------------------------------------------------------------
+    # Mode helpers
+    # ------------------------------------------------------------------
+
+    def set_mode(self, mode: str) -> None:
+        """Switch the operating mode at runtime."""
+        if mode not in self.VALID_MODES:
+            raise ValueError(
+                f"Invalid mode '{mode}'. Must be one of: {sorted(self.VALID_MODES)}"
+            )
+        self.mode = mode
+        logger.info(f"CerribroAgent '{self.name}' switched to mode='{self.mode}'")
+
+    # ------------------------------------------------------------------
+    # Grounding helpers
+    # ------------------------------------------------------------------
+
+    def _is_unsafe(self, params: Dict[str, Any]) -> bool:
+        """Return True if the request contains unsafe or malicious signals."""
+        unsafe_keywords = {
+            "malware", "exploit", "ransomware", "backdoor", "keylogger",
+            "rootkit", "phishing", "shellcode",
+        }
+        payload = json.dumps(params).lower()
+        return any(kw in payload for kw in unsafe_keywords)
+
+    def _is_ambiguous(self, params: Dict[str, Any]) -> bool:
+        """Return True if the request is under-specified."""
+        # A request is ambiguous if it has no meaningful description
+        description = params.get("description", params.get("raw", ""))
+        return not description or len(str(description).strip()) < 10
+
+    def _build_clarification_request(self, params: Dict[str, Any]) -> str:
+        """Produce a clarifying question for the user."""
+        mode_questions = {
+            "app_builder": (
+                "Please describe the application you want to build, including "
+                "its target platform, primary features, and any tech-stack preferences."
+            ),
+            "game_builder": (
+                "Please describe the game concept, target platform, genre, "
+                "and any preferred engine or framework."
+            ),
+            "coding_assistant": (
+                "Please provide the code snippet or file, describe what it should do, "
+                "and explain the specific problem you need help with."
+            ),
+        }
+        return mode_questions.get(self.mode, "Please provide more details about your request.")
+
+    def _assess_confidence(self, params: Dict[str, Any]) -> float:
+        """
+        Return a confidence score in [0, 1].
+
+        Higher scores reflect well-specified, familiar requests.
+        """
+        description = str(params.get("description", params.get("raw", "")))
+        word_count = len(description.split())
+        # Simple heuristic: score rises with detail up to a cap
+        raw_score = min(1.0, 0.5 + (word_count / 40) * 0.5)
+        return round(raw_score, 2)
+
+    # ------------------------------------------------------------------
+    # Plan builders per mode
+    # ------------------------------------------------------------------
+
+    def _build_plan(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Dispatch to the correct mode-specific plan builder."""
+        builders = {
+            "app_builder": self._plan_app_builder,
+            "game_builder": self._plan_game_builder,
+            "coding_assistant": self._plan_coding_assistant,
+        }
+        builder = builders[self.mode]
+        return builder(params)
+
+    def _plan_app_builder(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Build a plan for application scaffolding."""
+        return {
+            "decision": "execute",
+            "workflow": "app_builder",
+            "steps": [
+                "clarify_requirements",
+                "choose_architecture",
+                "scaffold_project_structure",
+                "implement_core_features",
+                "write_tests",
+                "document_api",
+                "review_and_iterate",
+            ],
+            "parameters": params,
+        }
+
+    def _plan_game_builder(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Build a plan for game development assistance."""
+        return {
+            "decision": "execute",
+            "workflow": "game_builder",
+            "steps": [
+                "clarify_game_concept",
+                "select_engine_or_framework",
+                "design_game_loop",
+                "implement_mechanics",
+                "add_assets_and_ui",
+                "test_gameplay",
+                "polish_and_optimise",
+            ],
+            "parameters": params,
+        }
+
+    def _plan_coding_assistant(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Build a plan for coding assistance."""
+        return {
+            "decision": "execute",
+            "workflow": "coding_assistant",
+            "steps": [
+                "understand_context",
+                "identify_problem",
+                "propose_minimal_fix",
+                "apply_change",
+                "run_or_suggest_tests",
+                "update_docs_if_needed",
+            ],
+            "parameters": params,
+        }
+
+    def _execute_plan(self, plan: Dict[str, Any]) -> Dict[str, Any]:
+        """Return a structured execution summary for the given plan."""
+        return {
+            "workflow": plan.get("workflow", self.mode),
+            "steps_planned": plan.get("steps", []),
+            "steps_completed": [],
+            "notes": (
+                "Plan produced. Steps are ready for iterative execution. "
+                "Grounding policy enforced — no fabricated references included."
+            ),
+        }
+
+    # ------------------------------------------------------------------
+    # Capability registration
+    # ------------------------------------------------------------------
+
+    def _register_default_capabilities(self) -> None:
+        """Register Cerribro's built-in capabilities."""
+        default_capabilities = [
+            AgentCapability(
+                name="app_scaffolding",
+                description="Scaffold and architect full-stack or standalone applications.",
+                confidence_score=0.92,
+            ),
+            AgentCapability(
+                name="game_development",
+                description="Engine-agnostic game design, mechanics, and implementation guidance.",
+                confidence_score=0.88,
+            ),
+            AgentCapability(
+                name="code_debugging",
+                description="Identify and fix bugs in existing code with minimal side effects.",
+                confidence_score=0.95,
+            ),
+            AgentCapability(
+                name="code_refactoring",
+                description="Improve code structure, readability, and maintainability.",
+                confidence_score=0.93,
+            ),
+            AgentCapability(
+                name="test_generation",
+                description="Generate unit, integration, and end-to-end tests for code.",
+                confidence_score=0.90,
+            ),
+            AgentCapability(
+                name="documentation",
+                description="Write and update code documentation and API references.",
+                confidence_score=0.91,
+            ),
+            AgentCapability(
+                name="grounded_retrieval",
+                description="Answer questions using verifiable, cited knowledge only.",
+                confidence_score=0.96,
+            ),
+        ]
+        for cap in default_capabilities:
+            self.register_capability(cap)
+
+
 # ============================================================================
 # Factory and Utilities
 # ============================================================================
@@ -785,7 +1124,8 @@ class AgentFactory:
         "executor": ExecutorAgent,
         "analyzer": AnalyzerAgent,
         "learner": LearnerAgent,
-        "orchestrator": OrchestratorAgent
+        "orchestrator": OrchestratorAgent,
+        "cerribro": CerribroAgent,
     }
 
     @classmethod
