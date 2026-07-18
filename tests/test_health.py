@@ -47,7 +47,7 @@ def test_ready_with_invalid_app_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["status"] == "not_ready"
 
 
-def test_ready_with_app_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ready_with_invalid_test_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APP_ENV", "test")
     response = client.get("/ready")
     # "test" is not a recognised value — expect 503
@@ -58,7 +58,9 @@ def test_ready_with_valid_app_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APP_ENV", "production")
     response = client.get("/ready")
     assert response.status_code == 200
-    assert response.json()["status"] == "ready"
+    body = response.json()
+    assert body["status"] == "ready"
+    assert body["env"] == "production"
 
 
 def test_configs_endpoint() -> None:

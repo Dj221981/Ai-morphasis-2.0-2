@@ -59,8 +59,10 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run tests
-        # APP_ENV is required by the /ready endpoint; set it here so the
-        # test_ready_with_app_env test has a consistent value in CI.
+        # APP_ENV is required by the /ready endpoint; set it to a valid
+        # value so that test_ready_with_valid_app_env passes in CI.
+        # Individual tests that check invalid/missing values use monkeypatch
+        # to override this environment variable for their scope.
         env:
           APP_ENV: development
         run: python -m pytest tests -v
