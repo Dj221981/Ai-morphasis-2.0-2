@@ -51,8 +51,8 @@ Currently checks that `APP_ENV` is set. Returns HTTP 200 when ready, HTTP 503 wh
 ```json
 {
   "status": "not_ready",
-  "missing_env": ["APP_ENV"],
-  "note": "Set required environment variables before sending traffic. See .env.example for guidance."
+  "issues": ["APP_ENV is not set"],
+  "note": "Set APP_ENV to 'development', 'staging', or 'production' before sending traffic. See .env.example for guidance."
 }
 ```
 

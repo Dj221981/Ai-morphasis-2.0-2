@@ -13,6 +13,8 @@ jobs:
   lint:
     name: Lint (flake8)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -36,6 +38,8 @@ jobs:
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     needs: lint
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -58,5 +62,5 @@ jobs:
         # APP_ENV is required by the /ready endpoint; set it here so the
         # test_ready_with_app_env test has a consistent value in CI.
         env:
-          APP_ENV: ci
+          APP_ENV: development
         run: python -m pytest tests -v

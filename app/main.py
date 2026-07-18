@@ -82,10 +82,11 @@ def ready() -> JSONResponse:
     """
     Startup readiness check.
 
-    Verifies that critical runtime configuration is available before
-    the service is considered ready to accept traffic.  Currently checks:
+    Verifies that critical runtime configuration is available and valid
+    before the service is considered ready to accept traffic.  Currently checks:
 
-    - ``APP_ENV`` environment variable is set (required at boot).
+    - ``APP_ENV`` environment variable is set to a recognised value
+      (``development``, ``staging``, or ``production``).
 
     Returns HTTP 200 when ready, HTTP 503 when not.
 
@@ -94,25 +95,30 @@ def ready() -> JSONResponse:
         It does not verify database connectivity, model weights, or
         downstream service availability.
     """
-    missing: list[str] = []
-    if not os.getenv("APP_ENV"):
-        missing.append("APP_ENV")
+    valid_envs = {"development", "staging", "production"}
+    app_env = os.getenv("APP_ENV", "").strip()
 
-    if missing:
-        logger.warning("Readiness check failed — missing env vars: %s", missing)
+    issues: list[str] = []
+    if not app_env:
+        issues.append("APP_ENV is not set")
+    elif app_env not in valid_envs:
+        issues.append(f"APP_ENV='{app_env}' is not a recognised value; expected one of {sorted(valid_envs)}")
+
+    if issues:
+        logger.warning("Readiness check failed: %s", "; ".join(issues))
         return JSONResponse(
             status_code=503,
             content={
                 "status": "not_ready",
-                "missing_env": missing,
+                "issues": issues,
                 "note": (
-                    "Set required environment variables before sending traffic. "
-                    "See .env.example for guidance."
+                    "Set APP_ENV to 'development', 'staging', or 'production' "
+                    "before sending traffic. See .env.example for guidance."
                 ),
             },
         )
 
-    return JSONResponse(status_code=200, content={"status": "ready", "env": os.getenv("APP_ENV")})
+    return JSONResponse(status_code=200, content={"status": "ready", "env": app_env})
 
 
 @app.get("/configs", summary="List available model configurations")
