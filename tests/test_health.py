@@ -76,3 +76,38 @@ def test_configs_endpoint() -> None:
 def test_not_found_returns_404() -> None:
     response = client.get("/nonexistent-route")
     assert response.status_code == 404
+
+
+def test_health_xss_protection_header() -> None:
+    response = client.get("/health")
+    assert response.headers.get("X-XSS-Protection") == "1; mode=block"
+
+
+def test_ready_with_staging_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "staging")
+    response = client.get("/ready")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ready"
+    assert body["env"] == "staging"
+
+
+def test_ready_failure_body_has_note(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("APP_ENV", raising=False)
+    response = client.get("/ready")
+    assert response.status_code == 503
+    body = response.json()
+    assert "note" in body
+    assert "APP_ENV" in body["note"]
+
+
+def test_configs_all_names_returned() -> None:
+    response = client.get("/configs")
+    body = response.json()
+    expected = {"dqn", "policy", "small", "large", "continuous", "multi_agent"}
+    assert expected == set(body["available"])
+
+
+def test_root_version_value() -> None:
+    response = client.get("/")
+    assert response.json()["version"] == "2.0.2"

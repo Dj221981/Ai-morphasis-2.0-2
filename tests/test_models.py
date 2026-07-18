@@ -73,3 +73,18 @@ class TestConfigRegistry:
         cfg = get_config("dqn")
         cfg["model"]["state_size"] = 9999
         assert CONFIG_REGISTRY["dqn"]["model"]["state_size"] == original
+
+
+class TestConfigValueInvariants:
+    @pytest.mark.parametrize("name", ["dqn", "policy", "small", "large", "continuous", "multi_agent"])
+    def test_learning_rate_is_positive(self, name: str) -> None:
+        cfg = get_config(name)
+        lr = cfg["model"]["learning_rate"]
+        assert isinstance(lr, float), f"{name}: learning_rate must be a float"
+        assert lr > 0, f"{name}: learning_rate must be positive, got {lr}"
+
+    @pytest.mark.parametrize("name", ["dqn", "policy", "small", "large", "continuous", "multi_agent"])
+    def test_gamma_in_valid_range(self, name: str) -> None:
+        cfg = get_config(name)
+        gamma = cfg["model"]["gamma"]
+        assert 0 < gamma <= 1, f"{name}: gamma must be in (0, 1], got {gamma}"

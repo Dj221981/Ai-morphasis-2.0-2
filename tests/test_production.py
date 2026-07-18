@@ -86,3 +86,18 @@ def test_settings_no_json_logs_in_development() -> None:
 def test_settings_json_logs_in_staging() -> None:
     s = Settings(app_env="staging")
     assert s.json_logs is True
+
+
+def test_settings_staging_is_not_production() -> None:
+    s = Settings(app_env="staging")
+    assert s.is_production is False
+
+
+def test_settings_is_production_false_in_development() -> None:
+    s = Settings(app_env="development")
+    assert s.is_production is False
+
+
+def test_settings_debug_defaults_false() -> None:
+    s = Settings(app_env="development")
+    assert s.debug is False
