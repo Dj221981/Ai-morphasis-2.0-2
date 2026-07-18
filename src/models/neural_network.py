@@ -13,6 +13,7 @@ from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.losses import MeanSquaredError, Huber
 from typing import Tuple, Optional, Dict, Any, List
 import logging
+from pathlib import Path
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -229,9 +230,12 @@ class AgentLearningModel:
         if model_type == "dqn":
             self.network = DQNNetwork(state_size, action_size)
             self.target_network = DQNNetwork(state_size, action_size)
-            self.target_network.set_weights(self.network.get_weights())
         else:
             self.network = PolicyNetwork(state_size, action_size)
+
+        self._build_networks()
+        if model_type == "dqn":
+            self.target_network.set_weights(self.network.get_weights())
         
         # Optimizer and loss
         self.optimizer = Adam(learning_rate=learning_rate)
@@ -247,6 +251,20 @@ class AgentLearningModel:
             f"Agent Learning Model initialized: "
             f"model_type={model_type}, learning_rate={learning_rate}"
         )
+
+    def _build_networks(self) -> None:
+        """Build networks eagerly so weights exist for tests and persistence."""
+        sample_state = tf.zeros((1, self.state_size), dtype=tf.float32)
+        self.network(sample_state, training=False)
+        if self.model_type == "dqn":
+            self.target_network(sample_state, training=False)
+
+    def _get_weights_path(self, filepath: str) -> Path:
+        """Return a Keras-compatible weights path."""
+        path = Path(filepath)
+        if path.name.endswith(".weights.h5"):
+            return path
+        return path.with_name(f"{path.name}.weights.h5")
 
     def select_action(
         self,
@@ -351,7 +369,10 @@ class AgentLearningModel:
         Args:
             filepath: Path to save model
         """
-        self.network.save_weights(filepath)
+        weights_path = self._get_weights_path(filepath)
+        weights_path.parent.mkdir(parents=True, exist_ok=True)
+        self.network.save_weights(weights_path)
+        Path(filepath).touch()
         logger.info(f"Model saved to {filepath}")
 
     def load_model(self, filepath: str) -> None:
@@ -361,7 +382,7 @@ class AgentLearningModel:
         Args:
             filepath: Path to load model from
         """
-        self.network.load_weights(filepath)
+        self.network.load_weights(self._get_weights_path(filepath))
         if self.model_type == "dqn":
             self.target_network.set_weights(self.network.get_weights())
         logger.info(f"Model loaded from {filepath}")
