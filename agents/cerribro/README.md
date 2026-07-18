@@ -46,6 +46,8 @@ print(result["output"])     # structured execution summary
 | `coding_assistant` | Debug, refactor, test, and document code (default) |
 | `app_builder`      | Scaffold and architect full applications          |
 | `game_builder`     | Engine-agnostic game development guidance         |
+| `autonomous`       | Goal-driven autonomous execution with iterative planning and replanning |
+| `software_maker`   | End-to-end software product development with OT/industrial builder support |
 
 Switch modes at runtime:
 
@@ -79,6 +81,8 @@ These flags are also present in [`agent_config.json`](agent_config.json) for pro
 - [`workflows/app_builder.md`](workflows/app_builder.md)
 - [`workflows/game_builder.md`](workflows/game_builder.md)
 - [`workflows/coding_assistant.md`](workflows/coding_assistant.md)
+- [`workflows/autonomous.md`](workflows/autonomous.md)
+- [`workflows/software_maker.md`](workflows/software_maker.md)
 
 ---
 
