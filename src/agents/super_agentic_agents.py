@@ -766,6 +766,11 @@ class DeepMindAgent(BaseAgent):
     _HIGH_CONFIDENCE = 0.80
     _MEDIUM_CONFIDENCE = 0.55
 
+    # Confidence heuristic parameters
+    _BASE_CONFIDENCE: float = 0.5
+    _WORDS_FOR_MAX_BOOST: int = 40
+    _CONFIDENCE_BOOST: float = 0.3
+
     def __init__(self, name: str = "DeepMind"):
         super().__init__(name, role=AgentRole.ANALYZER)
         self.deep_storage = DeepStorageMemory(agent_id=self.id, base_memory=self.memory)
@@ -818,8 +823,10 @@ class DeepMindAgent(BaseAgent):
 
         # Archive high-confidence conclusions to deep storage
         if best.get("confidence", 0.0) >= self._MEDIUM_CONFIDENCE:
+            problem_hash = abs(hash(problem)) % (10 ** 8)
+            archive_key = f"conclusion:{datetime.now().strftime('%Y%m%dT%H%M%S')}:{problem_hash}"
             self.deep_storage.archive(
-                key=f"conclusion:{uuid.uuid4()}",
+                key=archive_key,
                 value={"problem": problem, "conclusion": best},
                 importance=best.get("confidence", 0.5),
             )
@@ -891,7 +898,11 @@ class DeepMindAgent(BaseAgent):
         these; here we produce structured placeholders so the pipeline is fully
         exercised and testable.
         """
-        base_confidence = min(1.0, 0.5 + (len(problem.split()) / 40) * 0.3)
+        base_confidence = min(
+            1.0,
+            self._BASE_CONFIDENCE
+            + (len(problem.split()) / self._WORDS_FOR_MAX_BOOST) * self._CONFIDENCE_BOOST,
+        )
         hypotheses = [
             {
                 "id": 1,
@@ -1177,6 +1188,11 @@ class CerribroAgent(BaseAgent):
     # Valid operating modes for Cerribro
     VALID_MODES = {"app_builder", "game_builder", "coding_assistant", "autonomous", "software_maker"}
 
+    # Confidence heuristic parameters
+    _BASE_CONFIDENCE: float = 0.5
+    _WORDS_FOR_MAX_BOOST: int = 40
+    _CONFIDENCE_BOOST: float = 0.5
+
     # Grounding flags — machine-readable policy toggles
     GROUNDING_FLAGS = {
         "retrieval_first": True,
@@ -1377,7 +1393,11 @@ class CerribroAgent(BaseAgent):
         description = str(params.get("description", params.get("raw", "")))
         word_count = len(description.split())
         # Simple heuristic: score rises with detail up to a cap
-        raw_score = min(1.0, 0.5 + (word_count / 40) * 0.5)
+        raw_score = min(
+            1.0,
+            self._BASE_CONFIDENCE
+            + (word_count / self._WORDS_FOR_MAX_BOOST) * self._CONFIDENCE_BOOST,
+        )
         return round(raw_score, 2)
 
     # ------------------------------------------------------------------
