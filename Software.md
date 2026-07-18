@@ -1,57 +1,50 @@
-# Software
-
-## Overview
-
-This document describes the software in this repository. It can be used as a quick reference for understanding the project, how it works, and how to get started.
+# Software Overview
 
 ## Purpose
 
-The goal of the software is to provide a clear, maintainable foundation for the Ai-morphasis 2.0-2 project.
+This repository provides a FastAPI service for Ai-morphasis-2.0-2 with supporting model configuration modules.
+The currently supported path is: install dependencies, run the API from `app/main.py`, and validate with pytest.
 
-## Features
+## Requirements
 
-- Project documentation
-- Clear setup guidance
-- Usage notes
-- Extensible structure for future updates
+- Python 3.11+
+- `pip`
 
-## Getting Started
-
-### Prerequisites
-
-Add any required tools, runtimes, or dependencies here.
-
-### Installation
+## Install
 
 ```bash
-# Add installation steps here
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
 ```
 
-### Running the Software
+Optional ML stack for TensorFlow modules:
 
 ```bash
-# Add run commands here
+pip install -r requirements-ml.txt
 ```
 
-## Usage
+## Run
 
-Explain the main ways to use the software here. Include examples if possible.
+```bash
+uvicorn app.main:app --reload
+```
+
+## Test
+
+```bash
+pytest tests -q
+```
 
 ## Configuration
 
-Document any configuration files, environment variables, or settings required by the project.
+- `APP_ENV` controls `/ready` status reporting.
+- Model presets are defined in `src/config/model_config.py` and exposed at `GET /configs`.
 
-## Project Structure
+## CI
 
-Describe the most important files and directories in the repository.
+GitHub Actions required test workflow:
+- `.github/workflows/tests.yml`
 
-## Contributing
-
-1. Create a branch for your changes.
-2. Make your updates.
-3. Test your changes.
-4. Open a pull request.
-
-## License
-
-Add license information here.
+It performs syntax validation and runs the pytest suite on Python 3.11 and 3.12.

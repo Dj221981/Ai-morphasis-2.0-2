@@ -1,64 +1,54 @@
-# Hey there! 👋
+# Ai-morphasis-2.0-2
 
-Welcome to my GitHub profile! I'm a **Full-Stack Developer** passionate about creating innovative solutions across the web, cloud infrastructure, and game development. Currently building **Ai-morphasis 2.0**, an ambitious AI-driven project pushing the boundaries of what's possible.
+Ai-morphasis-2.0-2 is a Python FastAPI service with supporting AI model configuration code under `src/`.
+This repository currently ships a runnable API, lightweight health/readiness checks, and a test suite that validates the supported service surface.
 
-## 🚀 About Me
+## Repository layout
 
-I thrive on solving complex problems and building scalable, production-grade applications. With a balanced approach to technical excellence and creative problem-solving, I'm driven by the challenge of bringing ideas to life through code.
+- `app/main.py` - FastAPI application entrypoint and routes.
+- `src/config/model_config.py` - model configuration registry used by the API.
+- `src/models/` and `src/data/` - neural network and preprocessing modules.
+- `tests/` - API and configuration tests executed in CI.
+- `.github/workflows/tests.yml` - required CI workflow for syntax + tests.
 
-- 🔭 **Currently creating** Ai-morphasis 2.0 — a sophisticated AI system with evolving capabilities
-- 🌱 **Always learning** new architectures, frameworks, and best practices
-- 💡 **Interested in** Full-Stack Development, Cloud Infrastructure, Game Dev, and AI/ML applications
-- 🎮 **Passionate about** building engaging experiences across platforms
-- 💬 **Ask me about** scalable architecture, cloud solutions, game mechanics, or AI implementation
-- 📫 **Let's connect** — reach out via email or social media!
+## Quick start
 
-## 💻 Tech Stack
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
 
-- **Languages**: Python, JavaScript/TypeScript, and more
-- **Full-Stack**: Frontend UI → Backend APIs → Database Design
-- **Cloud & Infrastructure**: Deploying and scaling applications in the cloud
-- **Game Development**: Building interactive experiences
-- **AI/ML**: Implementing intelligent systems and algorithms
-- **DevOps & Testing**: GitHub Actions (CI/CD), Docker, pytest, flake8, code coverage tracking
+Run the API:
 
-## 🎯 Featured Work
+```bash
+uvicorn app.main:app --reload
+```
 
-- **[Ai-morphasis 2.0](https://github.com/Dj221981/Ai-morphasis-2.0-2)** — A cutting-edge AI system with comprehensive testing, advanced CI/CD pipelines, and multi-version Python support. Features professional-grade linting, code coverage tracking, and specialized DeepMind tool integration.
+Run tests:
 
-## 📊 GitHub Activity
+```bash
+pytest tests -q
+```
 
-![GitHub Stats](https://github-readme-stats.vercel.app/api?username=Dj221981&show_icons=true&theme=dark)
+## Optional ML dependency set
 
-![Top Languages](https://github-readme-stats.vercel.app/api/top-langs/?username=Dj221981&layout=compact&theme=dark)
+If you need to execute TensorFlow-based modules in `src/models` and `src/data`, install:
 
-## 🤝 Connect With Me
+```bash
+pip install -r requirements-ml.txt
+```
 
-Let's collaborate, discuss tech, or just chat!
+## Environment variables
 
-- **Email**: [darrenjris24@gmail.com](mailto:darrenjris24@gmail.com)
-- **Facebook**: [Connect on Facebook](#)
-- **YouTube**: [Subscribe on YouTube](#)
-- **LinkedIn**: [Connect on LinkedIn](#)
+- `APP_ENV` - used by `/ready` to report readiness (`ready` vs `degraded`).
 
-## 🎮 Current Focus
+## Current production-readiness scope
 
-Working on expanding **Ai-morphasis 2.0** with:
-- Enhanced AI capabilities and system architecture
-- Cloud infrastructure optimization
-- Integration with modern frameworks and tools
-- Comprehensive testing and deployment pipelines
-- Game development integrations
+This repository now provides:
+- a runnable FastAPI app with basic hardening headers and global error handling,
+- coherent CI in `.github/workflows/tests.yml`,
+- dependencies and docs aligned to the tested runtime path.
 
-## 📝 My Approach
-
-I believe in writing clean, maintainable code with solid testing practices. You'll notice my projects emphasize:
-- ✅ Comprehensive test coverage
-- 🔄 Automated CI/CD pipelines
-- 📦 Professional code quality standards
-- 🚀 Scalable architecture
-- 🎯 Production-ready deployments
-
----
-
-⭐ **If you find my work interesting, feel free to star a repo or reach out to collaborate!**
+Remaining work for full production readiness would include auth, persistent storage, structured observability, and deployment infrastructure.

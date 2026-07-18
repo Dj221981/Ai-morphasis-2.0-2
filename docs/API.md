@@ -1,156 +1,84 @@
 # API Reference
 
-## Core Modules
+## Base service
 
-### `ai.agents.BaseAgent`
+FastAPI application entrypoint: `app/main.py`
 
-Base class for all adaptive agents in the system.
+## Endpoints
 
-#### Methods
+### `GET /`
+Returns service identity.
 
-**`__init__(name: str, agent_type: str = "base")`**
-- Initialize a new agent
-- Parameters:
-  - `name`: Unique identifier for the agent
-  - `agent_type`: Type of agent (default: "base")
+Example response:
 
-**`execute_action(action: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]`**
-- Execute an action in the environment
-- Parameters:
-  - `action`: Name of the action to execute
-  - `params`: Optional parameters for the action
-- Returns: Dictionary with action result
-
-**`learn(experience: Dict[str, Any]) -> None`**
-- Process experience and update knowledge
-- Parameters:
-  - `experience`: Dictionary containing experience data
-
-**`get_state() -> Dict[str, Any]`**
-- Get current agent state
-- Returns: State dictionary
-
-**`reset() -> None`**
-- Reset agent to initial state
-
-#### Properties
-
-- `name`: Get agent name
-- `agent_id`: Get unique agent ID
-
-#### Example
-
-```python
-from ai.agents import BaseAgent
-
-# Create an agent
-agent = BaseAgent(name="MyAgent")
-
-# Execute an action
-result = agent.execute_action("move", {"direction": "north", "distance": 10})
-
-# Learn from experience
-agent.learn({"observation": "wall_detected", "reward": -1})
-
-# Get current state
-state = agent.get_state()
-
-# Reset agent
-agent.reset()
+```json
+{
+  "message": "Ai-morphasis 2.0-2 API is running"
+}
 ```
 
-## Configuration
+### `GET /health`
+Liveness endpoint for basic process health.
 
-### `config.Settings`
+Example response:
 
-Application-wide settings using Pydantic.
-
-#### Configuration Options
-
-```python
-# App Info
-app_name: str = "Ai-morphasis"
-version: str = "2.0.2"
-debug: bool = False
-
-# Agent Configuration
-max_agents: int = 100
-agent_memory_size: int = 10000
-
-# Game Configuration
-game_width: int = 1280
-game_height: int = 720
-target_fps: int = 60
-
-# Model Configuration
-model_device: str = "cpu"  # cpu or cuda
-batch_size: int = 32
-learning_rate: float = 0.001
-
-# Logging
-log_level: str = "INFO"
-log_file: Optional[str] = "logs/ai_morphasis.log"
+```json
+{
+  "status": "ok",
+  "service": "api",
+  "version": "0.1.0"
+}
 ```
 
-#### Usage
+### `GET /ready`
+Readiness endpoint based on required runtime environment.
 
-```python
-from config import Settings
+- Returns `ready` when required environment variables are present.
+- Returns `degraded` with details when required variables are missing.
 
-config = Settings()
-print(f"Running {config.app_name} v{config.version}")
-print(f"Using device: {config.model_device}")
+Example degraded response:
+
+```json
+{
+  "status": "degraded",
+  "detail": "Missing environment variables: APP_ENV"
+}
 ```
+
+### `GET /configs`
+Returns available model configuration keys from `src/config/model_config.py`.
+
+Example response:
+
+```json
+{
+  "available_configs": ["dqn", "policy", "small", "large", "continuous", "multi_agent"]
+}
+```
+
+## Error handling
+
+Unhandled exceptions are converted to:
+
+```json
+{
+  "detail": "Internal server error"
+}
+```
+
+with HTTP 500 status.
+
+## Security headers
+
+The app adds basic hardening headers to responses:
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY`
+- `Cache-Control: no-store`
 
 ## Testing
 
-### Fixtures
-
-All pytest fixtures are defined in `tests/conftest.py`:
-
-- `sample_agent`: Pre-configured test agent
-- `test_config`: Test configuration
-
-### Running Tests
+Run API and config tests:
 
 ```bash
-# Run all tests
-pytest tests/ -v
-
-# Run with coverage
-pytest tests/ --cov=src --cov-report=html
-
-# Run specific test file
-pytest tests/test_base_agent.py -v
-
-# Run specific test
-pytest tests/test_base_agent.py::TestBaseAgentInitialization::test_agent_creation -v
-
-# Run with markers
-pytest tests/ -m "unit"
+pytest tests -q
 ```
-
-## Logging
-
-The application uses `loguru` for logging:
-
-```python
-from loguru import logger
-
-logger.info("Information message")
-logger.debug("Debug message")
-logger.warning("Warning message")
-logger.error("Error message")
-logger.critical("Critical message")
-```
-
-Logs are written to:
-- Console (stdout)
-- File: `logs/ai_morphasis.log` (with rotation)
-
----
-
-**For more information, see:**
-- [Architecture Guide](ARCHITECTURE.md)
-- [Contributing Guide](CONTRIBUTING.md)
-- [README](README.md)
