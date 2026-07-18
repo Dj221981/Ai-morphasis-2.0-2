@@ -264,6 +264,8 @@ class AgentLearningModel:
         path = Path(filepath)
         if path.name.endswith(".weights.h5"):
             return path
+        if path.suffix:
+            return path.with_suffix(".weights.h5")
         return path.with_name(f"{path.name}.weights.h5")
 
     def select_action(
