@@ -1,0 +1,118 @@
+{
+  "agent": {
+    "name": "Cerribro",
+    "version": "2.0.0",
+    "description": "Specialist agentic AI for application building, game development, and coding assistance — with deep intelligence, deep research, and DeepMind-style rigor.",
+    "role": "specialized",
+    "default_mode": "coding_assistant",
+    "valid_modes": ["app_builder", "game_builder", "coding_assistant"]
+  },
+
+  "grounding": {
+    "retrieval_first": true,
+    "fabrication_allowed": false,
+    "confidence_signalling": true,
+    "source_attribution": true,
+    "clarification_on_ambiguity": true,
+    "ambiguity_min_description_length": 10,
+    "unsafe_request_rejection": true,
+    "unsafe_keywords": [
+      "malware", "exploit", "ransomware", "backdoor",
+      "keylogger", "rootkit", "phishing", "shellcode"
+    ],
+    "minimal_viable_change": true,
+    "test_alongside": true
+  },
+
+  "capabilities": {
+    "app_scaffolding": {
+      "description": "Scaffold and architect full-stack or standalone applications.",
+      "confidence_score": 0.92,
+      "enabled": true
+    },
+    "game_development": {
+      "description": "Engine-agnostic game design, mechanics, and implementation guidance.",
+      "confidence_score": 0.88,
+      "enabled": true
+    },
+    "code_debugging": {
+      "description": "Identify and fix bugs in existing code with minimal side effects.",
+      "confidence_score": 0.95,
+      "enabled": true
+    },
+    "code_refactoring": {
+      "description": "Improve code structure, readability, and maintainability.",
+      "confidence_score": 0.93,
+      "enabled": true
+    },
+    "test_generation": {
+      "description": "Generate unit, integration, and end-to-end tests for code.",
+      "confidence_score": 0.90,
+      "enabled": true
+    },
+    "documentation": {
+      "description": "Write and update code documentation and API references.",
+      "confidence_score": 0.91,
+      "enabled": true
+    },
+    "grounded_retrieval": {
+      "description": "Answer questions using verifiable, cited knowledge only.",
+      "confidence_score": 0.96,
+      "enabled": true
+    }
+  },
+
+  "performance": {
+    "max_active_tasks": 10,
+    "max_capabilities": 50,
+    "max_session_history": 500,
+    "confidence_threshold_for_auto_proceed": 0.75
+  },
+
+  "logging": {
+    "level": "INFO",
+    "include_session_history": true
+  },
+
+  "deep_modes": {
+    "_comment": "Deep upgrade layers — each can be toggled independently. See intelligence_framework.md, deep_research.md, and deepmind_loop.md.",
+
+    "strict_planning": {
+      "enabled": false,
+      "confidence_threshold_auto_proceed": 0.75,
+      "require_assumption_verification": true,
+      "log_decisions": true,
+      "max_subproblem_depth": 2
+    },
+
+    "deep_research": {
+      "enabled": false,
+      "min_evidence_records": {
+        "simple": 1,
+        "medium": 2,
+        "complex": 3
+      },
+      "max_source_age_months": 12,
+      "require_tier1_for_high_confidence": true,
+      "freshness_penalty": -0.05,
+      "contradiction_penalty": -0.05
+    },
+
+    "deepmind_loop": {
+      "enabled": false,
+      "max_rounds": 5,
+      "min_confidence_to_finalise": 0.75,
+      "confirmed_delta": 0.10,
+      "falsified_delta": -0.15,
+      "inconclusive_delta": -0.05
+    },
+
+    "governance": {
+      "separate_facts_assumptions_proposals": true,
+      "mark_speculative_content": true,
+      "require_test_evidence_for_code_changes": true,
+      "include_unknowns_section_below_confidence": 0.55,
+      "deny_unsafe_with_safe_alternative": true
+    }
+  }
+}

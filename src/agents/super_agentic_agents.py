@@ -774,6 +774,634 @@ class AgentSystem:
         return f"<AgentSystem: {self.name} ({len(self.agents)} agents)>"
 
 
+class CerribroAgent(BaseAgent):
+    """
+    Cerribro — Specialist Agentic AI for application building, game development,
+    and coding assistance.
+
+    Cerribro operates in three primary modes:
+        - ``app_builder``      : Scaffold and architect full applications.
+        - ``game_builder``     : Engine-agnostic game development guidance.
+        - ``coding_assistant`` : Debug, refactor, test, and document code.
+
+    Grounding policy
+    ----------------
+    Cerribro enforces a retrieval-evidence-first policy:
+        * No fabricated APIs, library names, or citations are emitted.
+        * Confidence is signalled explicitly in every response payload.
+        * Requests that are ambiguous trigger a clarification request.
+        * Unsafe or malicious requests are rejected with a clear reason and safe alternative.
+        * All planned changes default to the minimal viable increment.
+
+    Deep upgrade layers (v2.0)
+    --------------------------
+    Three optional deep modes extend the base grounding policy:
+        * ``strict_planning``  : Problem decomposition, assumptions log, decision log,
+                                 branching strategy, and confidence scoring.
+        * ``deep_research``    : Evidence gathering, source quality ranking, contradiction
+                                 detection, synthesis with citations, freshness checks.
+        * ``deepmind_loop``    : Hypothesis → experiment → evaluate → learn → iterate cycle.
+
+    Enable/disable each layer via :meth:`enable_deep_mode` /
+    :meth:`disable_deep_mode`, or pass ``deep_mode_config`` at init time.
+    """
+
+    # Valid operating modes for Cerribro
+    VALID_MODES = {"app_builder", "game_builder", "coding_assistant"}
+
+    # Grounding flags — machine-readable policy toggles
+    GROUNDING_FLAGS = {
+        "retrieval_first": True,
+        "fabrication_allowed": False,
+        "confidence_signalling": True,
+        "source_attribution": True,
+        "clarification_on_ambiguity": True,
+        "unsafe_request_rejection": True,
+        "minimal_viable_change": True,
+        "test_alongside": True,
+    }
+
+    # Default deep-mode configuration (mirrors agent_config.json deep_modes section)
+    DEFAULT_DEEP_MODE_CONFIG: Dict[str, Any] = {
+        "strict_planning": {
+            "enabled": False,
+            "confidence_threshold_auto_proceed": 0.75,
+            "require_assumption_verification": True,
+            "log_decisions": True,
+            "max_subproblem_depth": 2,
+        },
+        "deep_research": {
+            "enabled": False,
+            "min_evidence_records": {"simple": 1, "medium": 2, "complex": 3},
+            "max_source_age_months": 12,
+            "require_tier1_for_high_confidence": True,
+            "freshness_penalty": -0.05,
+            "contradiction_penalty": -0.05,
+        },
+        "deepmind_loop": {
+            "enabled": False,
+            "max_rounds": 5,
+            "min_confidence_to_finalise": 0.75,
+            "confirmed_delta": 0.10,
+            "falsified_delta": -0.15,
+            "inconclusive_delta": -0.05,
+        },
+        "governance": {
+            "separate_facts_assumptions_proposals": True,
+            "mark_speculative_content": True,
+            "require_test_evidence_for_code_changes": True,
+            "include_unknowns_section_below_confidence": 0.55,
+            "deny_unsafe_with_safe_alternative": True,
+        },
+    }
+
+    def __init__(
+        self,
+        name: str = "Cerribro",
+        mode: str = "coding_assistant",
+        deep_mode_config: Optional[Dict[str, Any]] = None,
+    ):
+        """
+        Initialise CerribroAgent.
+
+        Parameters
+        ----------
+        name : str
+            Display name for this agent instance.
+        mode : str
+            Operating mode — one of ``app_builder``, ``game_builder``,
+            or ``coding_assistant``.
+        deep_mode_config : dict, optional
+            Override specific deep-mode settings. Keys that are not provided
+            default to :attr:`DEFAULT_DEEP_MODE_CONFIG`. Pass
+            ``{"strict_planning": {"enabled": True}}`` to activate strict
+            planning mode without changing other defaults.
+        """
+        super().__init__(name, role=AgentRole.SPECIALIZED)
+
+        if mode not in self.VALID_MODES:
+            raise ValueError(
+                f"Invalid mode '{mode}'. Must be one of: {sorted(self.VALID_MODES)}"
+            )
+
+        self.mode = mode
+        self.grounding_flags: Dict[str, bool] = dict(self.GROUNDING_FLAGS)
+        self.session_history: List[Dict[str, Any]] = []
+        self.clarification_queue: List[str] = []
+
+        # Build deep-mode config by merging defaults with any user overrides
+        self.deep_mode_config: Dict[str, Any] = {}
+        for layer, defaults in self.DEFAULT_DEEP_MODE_CONFIG.items():
+            override = (deep_mode_config or {}).get(layer, {})
+            self.deep_mode_config[layer] = {**defaults, **override}
+
+        # Register built-in capabilities
+        self._register_default_capabilities()
+
+        logger.info(
+            f"CerribroAgent '{self.name}' initialised in mode='{self.mode}'"
+        )
+
+    # ------------------------------------------------------------------
+    # BaseAgent contract
+    # ------------------------------------------------------------------
+
+    def think(self, input_data: Any) -> Dict[str, Any]:
+        """
+        Reason about the incoming request and produce an actionable plan.
+
+        Applies grounding checks before committing to any plan:
+          1. Safety gate  — rejects unsafe/malicious requests.
+          2. Ambiguity gate — queues clarification for under-specified input.
+          3. Confidence assessment — rates certainty; low-confidence paths
+             are flagged for human review.
+          4. Deep layers (when enabled) — adds intelligence plan, evidence
+             bundle stub, and DeepMind loop stub to the plan.
+        """
+        params: Dict[str, Any] = input_data if isinstance(input_data, dict) else {"raw": input_data}
+
+        # Safety gate
+        if self._is_unsafe(params):
+            return {
+                "decision": "reject",
+                "reason": "Request flagged as unsafe or potentially malicious.",
+                "safe_alternative": (
+                    "If this is for authorised security research, consider using "
+                    "established tools such as OWASP ZAP or Burp Suite Community Edition."
+                ),
+                "confidence": 0.0,
+                "mode": self.mode,
+            }
+
+        # Ambiguity gate
+        if self._is_ambiguous(params):
+            clarification = self._build_clarification_request(params)
+            self.clarification_queue.append(clarification)
+            return {
+                "decision": "clarify",
+                "clarification": clarification,
+                "confidence": 0.5,
+                "mode": self.mode,
+            }
+
+        # Build mode-specific plan
+        plan = self._build_plan(params)
+        confidence = self._assess_confidence(params)
+        plan["confidence"] = confidence
+        plan["confidence_band"] = self._confidence_band(confidence)
+        plan["grounding_flags"] = self.grounding_flags
+        plan["mode"] = self.mode
+
+        # Deep layers — attach structured metadata when enabled
+        if self.deep_mode_config["strict_planning"]["enabled"]:
+            plan["deep_intelligence"] = self._build_intelligence_plan(params, confidence)
+
+        if self.deep_mode_config["deep_research"]["enabled"]:
+            plan["evidence_bundle"] = self._build_evidence_bundle_stub(params)
+
+        if self.deep_mode_config["deepmind_loop"]["enabled"]:
+            plan["deepmind_loop"] = self._build_deepmind_loop_stub()
+
+        # Governance tags
+        plan["facts"] = []
+        plan["assumptions"] = []
+        plan["proposals"] = []
+        plan["speculative"] = []
+
+        # Unknowns section if confidence is below threshold
+        unknowns_threshold = self.deep_mode_config["governance"][
+            "include_unknowns_section_below_confidence"
+        ]
+        if confidence < unknowns_threshold:
+            plan["unknowns_and_next_steps"] = (
+                "Confidence is below threshold. Please provide more context to proceed."
+            )
+
+        return plan
+
+    def act(self, decision: Dict[str, Any]) -> Any:
+        """
+        Execute or relay the plan produced by :meth:`think`.
+
+        Returns a structured result dict that always includes:
+        ``status``, ``mode``, ``confidence``, ``confidence_band``, and ``output``.
+        Unsafe rejections include a ``safe_alternative`` field.
+        """
+        decision_type = decision.get("decision", "execute")
+
+        if decision_type == "reject":
+            result = {
+                "status": "rejected",
+                "mode": self.mode,
+                "confidence": 0.0,
+                "confidence_band": "Uncertain",
+                "output": decision.get("reason", "Request rejected."),
+                "safe_alternative": decision.get("safe_alternative", ""),
+            }
+        elif decision_type == "clarify":
+            result = {
+                "status": "awaiting_clarification",
+                "mode": self.mode,
+                "confidence": decision.get("confidence", 0.5),
+                "confidence_band": self._confidence_band(decision.get("confidence", 0.5)),
+                "output": decision.get("clarification", "Please clarify your request."),
+            }
+        else:
+            confidence = decision.get("confidence", 0.9)
+            result = {
+                "status": "completed",
+                "mode": self.mode,
+                "confidence": confidence,
+                "confidence_band": self._confidence_band(confidence),
+                "output": self._execute_plan(decision),
+                "facts": decision.get("facts", []),
+                "assumptions": decision.get("assumptions", []),
+                "proposals": decision.get("proposals", []),
+                "speculative": decision.get("speculative", []),
+            }
+            # Propagate deep layer payloads if present
+            for key in ("deep_intelligence", "evidence_bundle", "deepmind_loop"):
+                if key in decision:
+                    result[key] = decision[key]
+            if "unknowns_and_next_steps" in decision:
+                result["unknowns_and_next_steps"] = decision["unknowns_and_next_steps"]
+
+        # Store session history
+        self.session_history.append({
+            "timestamp": datetime.now().isoformat(),
+            "decision": decision_type,
+            "result": result,
+        })
+        self.last_activity = datetime.now()
+
+        logger.info(
+            f"CerribroAgent '{self.name}' action completed: status={result['status']}"
+        )
+        return result
+
+    # ------------------------------------------------------------------
+    # Mode helpers
+    # ------------------------------------------------------------------
+
+    def set_mode(self, mode: str) -> None:
+        """Switch the operating mode at runtime."""
+        if mode not in self.VALID_MODES:
+            raise ValueError(
+                f"Invalid mode '{mode}'. Must be one of: {sorted(self.VALID_MODES)}"
+            )
+        self.mode = mode
+        logger.info(f"CerribroAgent '{self.name}' switched to mode='{self.mode}'")
+
+    # ------------------------------------------------------------------
+    # Deep mode helpers
+    # ------------------------------------------------------------------
+
+    def enable_deep_mode(self, layer: str) -> None:
+        """
+        Enable a deep upgrade layer at runtime.
+
+        Parameters
+        ----------
+        layer : str
+            One of ``"strict_planning"``, ``"deep_research"``, or ``"deepmind_loop"``.
+        """
+        if layer not in self.deep_mode_config:
+            raise ValueError(
+                f"Unknown deep mode layer '{layer}'. "
+                f"Must be one of: {sorted(self.deep_mode_config.keys())}"
+            )
+        self.deep_mode_config[layer]["enabled"] = True
+        logger.info(f"CerribroAgent '{self.name}': deep mode '{layer}' enabled.")
+
+    def disable_deep_mode(self, layer: str) -> None:
+        """
+        Disable a deep upgrade layer at runtime.
+
+        Parameters
+        ----------
+        layer : str
+            One of ``"strict_planning"``, ``"deep_research"``, or ``"deepmind_loop"``.
+        """
+        if layer not in self.deep_mode_config:
+            raise ValueError(
+                f"Unknown deep mode layer '{layer}'. "
+                f"Must be one of: {sorted(self.deep_mode_config.keys())}"
+            )
+        self.deep_mode_config[layer]["enabled"] = False
+        logger.info(f"CerribroAgent '{self.name}': deep mode '{layer}' disabled.")
+
+    def is_deep_mode_enabled(self, layer: str) -> bool:
+        """Return True if the specified deep mode layer is currently active."""
+        return bool(self.deep_mode_config.get(layer, {}).get("enabled", False))
+
+    # ------------------------------------------------------------------
+    # Grounding helpers
+    # ------------------------------------------------------------------
+
+    def _is_unsafe(self, params: Dict[str, Any]) -> bool:
+        """Return True if the request contains unsafe or malicious signals."""
+        unsafe_keywords = {
+            "malware", "exploit", "ransomware", "backdoor", "keylogger",
+            "rootkit", "phishing", "shellcode",
+        }
+        payload = json.dumps(params).lower()
+        return any(kw in payload for kw in unsafe_keywords)
+
+    def _is_ambiguous(self, params: Dict[str, Any]) -> bool:
+        """Return True if the request is under-specified."""
+        # A request is ambiguous if it has no meaningful description
+        description = params.get("description", params.get("raw", ""))
+        return not description or len(str(description).strip()) < 10
+
+    def _build_clarification_request(self, params: Dict[str, Any]) -> str:
+        """Produce a clarifying question for the user."""
+        mode_questions = {
+            "app_builder": (
+                "Please describe the application you want to build, including "
+                "its target platform, primary features, and any tech-stack preferences."
+            ),
+            "game_builder": (
+                "Please describe the game concept, target platform, genre, "
+                "and any preferred engine or framework."
+            ),
+            "coding_assistant": (
+                "Please provide the code snippet or file, describe what it should do, "
+                "and explain the specific problem you need help with."
+            ),
+        }
+        return mode_questions.get(self.mode, "Please provide more details about your request.")
+
+    def _assess_confidence(self, params: Dict[str, Any]) -> float:
+        """
+        Return a confidence score in [0, 1].
+
+        Higher scores reflect well-specified, familiar requests.
+        """
+        description = str(params.get("description", params.get("raw", "")))
+        word_count = len(description.split())
+        # Simple heuristic: score rises with detail up to a cap
+        raw_score = min(1.0, 0.5 + (word_count / 40) * 0.5)
+        return round(raw_score, 2)
+
+    @staticmethod
+    def _confidence_band(score: float) -> str:
+        """Map a numeric confidence score to a human-readable band label."""
+        if score >= 0.80:
+            return "High"
+        if score >= 0.55:
+            return "Medium"
+        if score >= 0.30:
+            return "Low"
+        return "Uncertain"
+
+    # ------------------------------------------------------------------
+    # Deep Intelligence helpers
+    # ------------------------------------------------------------------
+
+    def _build_intelligence_plan(
+        self, params: Dict[str, Any], confidence: float
+    ) -> Dict[str, Any]:
+        """
+        Build a minimal Deep Intelligence stub attached to the plan.
+
+        In a full integration, this would be populated by the LLM reasoning
+        loop. Here it provides the structural scaffold that the LLM/operator
+        must fill in, making the expected schema explicit.
+        """
+        cfg = self.deep_mode_config["strict_planning"]
+        return {
+            "enabled": True,
+            "confidence_threshold_auto_proceed": cfg["confidence_threshold_auto_proceed"],
+            "confidence_score": confidence,
+            "confidence_band": self._confidence_band(confidence),
+            "auto_proceed": confidence >= cfg["confidence_threshold_auto_proceed"],
+            "subproblems": [],
+            "assumptions": [],
+            "decisions": [],
+            "branches": {
+                "primary": [],
+                "fallbacks": [],
+            },
+            "_note": (
+                "Populate subproblems, assumptions, decisions, and branches "
+                "following intelligence_framework.md before proceeding."
+            ),
+        }
+
+    def _build_evidence_bundle_stub(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Build a minimal Deep Research evidence bundle stub.
+
+        In a full integration, the research pipeline populates this with
+        real evidence records. The stub makes the expected schema explicit.
+        """
+        description = str(params.get("description", params.get("raw", "")))
+        word_count = len(description.split())
+        complexity = "simple" if word_count < 15 else ("medium" if word_count < 40 else "complex")
+        cfg = self.deep_mode_config["deep_research"]
+        min_records = cfg["min_evidence_records"].get(complexity, 2)
+
+        return {
+            "enabled": True,
+            "complexity": complexity,
+            "min_evidence_records_required": min_records,
+            "research_questions": [],
+            "evidence_records": [],
+            "contradictions": [],
+            "evidence_map": {},
+            "freshness_warnings": [],
+            "synthesis_confidence": None,
+            "insufficient_evidence": True,
+            "unverified_claims": [],
+            "_note": (
+                "Populate research_questions and evidence_records following "
+                "deep_research.md before proceeding. Schema: evidence_schema.json."
+            ),
+        }
+
+    def _build_deepmind_loop_stub(self) -> Dict[str, Any]:
+        """
+        Build a minimal DeepMind loop tracking stub.
+
+        In a full integration, each round is populated as the agent iterates.
+        The stub makes the expected schema explicit.
+        """
+        cfg = self.deep_mode_config["deepmind_loop"]
+        return {
+            "enabled": True,
+            "mode": self.mode,
+            "max_rounds": cfg["max_rounds"],
+            "min_confidence_to_finalise": cfg["min_confidence_to_finalise"],
+            "total_rounds": 0,
+            "rounds": [],
+            "final_verdict": None,
+            "final_confidence": None,
+            "final_confidence_band": None,
+            "escalated": False,
+            "escalation_reason": None,
+            "_note": (
+                "Populate rounds following deepmind_loop.md. "
+                "Each round must have: hypothesis, success_criteria, experiment, "
+                "execution_method, status, confidence_delta, learnings."
+            ),
+        }
+
+    # ------------------------------------------------------------------
+    # Plan builders per mode
+    # ------------------------------------------------------------------
+
+    def _build_plan(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Dispatch to the correct mode-specific plan builder."""
+        builders = {
+            "app_builder": self._plan_app_builder,
+            "game_builder": self._plan_game_builder,
+            "coding_assistant": self._plan_coding_assistant,
+        }
+        builder = builders[self.mode]
+        return builder(params)
+
+    def _plan_app_builder(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Build a plan for application scaffolding."""
+        return {
+            "decision": "execute",
+            "workflow": "app_builder",
+            "steps": [
+                "intelligence_plan",
+                "research_plan",
+                "clarify_requirements",
+                "choose_architecture",
+                "scaffold_project_structure",
+                "implement_core_features",
+                "write_tests",
+                "document_api",
+                "validation_gate",
+                "review_and_iterate",
+            ],
+            "parameters": params,
+        }
+
+    def _plan_game_builder(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Build a plan for game development assistance."""
+        return {
+            "decision": "execute",
+            "workflow": "game_builder",
+            "steps": [
+                "intelligence_plan",
+                "research_plan",
+                "clarify_game_concept",
+                "select_engine_or_framework",
+                "design_game_loop",
+                "implement_mechanics",
+                "add_assets_and_ui",
+                "test_gameplay",
+                "validation_gate",
+                "polish_and_optimize",
+            ],
+            "parameters": params,
+        }
+
+    def _plan_coding_assistant(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Build a plan for coding assistance."""
+        return {
+            "decision": "execute",
+            "workflow": "coding_assistant",
+            "steps": [
+                "intelligence_plan",
+                "research_plan",
+                "understand_context",
+                "identify_problem",
+                "propose_minimal_fix",
+                "apply_change",
+                "run_or_suggest_tests",
+                "validation_gate",
+                "update_docs_if_needed",
+            ],
+            "parameters": params,
+        }
+
+    def _execute_plan(self, plan: Dict[str, Any]) -> Dict[str, Any]:
+        """Return a structured execution summary for the given plan."""
+        return {
+            "workflow": plan.get("workflow", self.mode),
+            "steps_planned": plan.get("steps", []),
+            "steps_completed": [],
+            "notes": (
+                "Plan produced. Steps are ready for iterative execution. "
+                "Grounding policy enforced — no fabricated references included."
+            ),
+        }
+
+    # ------------------------------------------------------------------
+    # Capability registration
+    # ------------------------------------------------------------------
+
+    def _register_default_capabilities(self) -> None:
+        """Register Cerribro's built-in capabilities."""
+        default_capabilities = [
+            AgentCapability(
+                name="app_scaffolding",
+                description="Scaffold and architect full-stack or standalone applications.",
+                confidence_score=0.92,
+            ),
+            AgentCapability(
+                name="game_development",
+                description="Engine-agnostic game design, mechanics, and implementation guidance.",
+                confidence_score=0.88,
+            ),
+            AgentCapability(
+                name="code_debugging",
+                description="Identify and fix bugs in existing code with minimal side effects.",
+                confidence_score=0.95,
+            ),
+            AgentCapability(
+                name="code_refactoring",
+                description="Improve code structure, readability, and maintainability.",
+                confidence_score=0.93,
+            ),
+            AgentCapability(
+                name="test_generation",
+                description="Generate unit, integration, and end-to-end tests for code.",
+                confidence_score=0.90,
+            ),
+            AgentCapability(
+                name="documentation",
+                description="Write and update code documentation and API references.",
+                confidence_score=0.91,
+            ),
+            AgentCapability(
+                name="grounded_retrieval",
+                description="Answer questions using verifiable, cited knowledge only.",
+                confidence_score=0.96,
+            ),
+            AgentCapability(
+                name="deep_intelligence",
+                description=(
+                    "Problem decomposition, assumptions tracking, decision logging, "
+                    "and confidence-scored planning."
+                ),
+                confidence_score=0.90,
+            ),
+            AgentCapability(
+                name="deep_research",
+                description=(
+                    "Evidence gathering, source quality ranking, contradiction detection, "
+                    "and grounded synthesis with citations."
+                ),
+                confidence_score=0.88,
+            ),
+            AgentCapability(
+                name="deepmind_loop",
+                description=(
+                    "Iterative hypothesis/experiment/evaluation cycle for rigorous "
+                    "validation across all Cerribro modes."
+                ),
+                confidence_score=0.87,
+            ),
+        ]
+        for cap in default_capabilities:
+            self.register_capability(cap)
+
+
 # ============================================================================
 # Factory and Utilities
 # ============================================================================
@@ -785,7 +1413,8 @@ class AgentFactory:
         "executor": ExecutorAgent,
         "analyzer": AnalyzerAgent,
         "learner": LearnerAgent,
-        "orchestrator": OrchestratorAgent
+        "orchestrator": OrchestratorAgent,
+        "cerribro": CerribroAgent,
     }
 
     @classmethod
