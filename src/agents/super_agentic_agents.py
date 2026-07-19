@@ -1105,7 +1105,7 @@ class CerribroAgent(BaseAgent):
             "malware", "exploit", "ransomware", "backdoor", "keylogger",
             "rootkit", "phishing", "shellcode",
         }
-        payload = json.dumps(params).lower()
+        payload = json.dumps(params, default=str).lower()
         return any(kw in payload for kw in unsafe_keywords)
 
     def _is_ambiguous(self, params: Dict[str, Any]) -> bool:
