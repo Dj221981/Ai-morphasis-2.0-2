@@ -721,3 +721,111 @@ class TestAgentSystemHelpers:
         result = system.submit_task(t)
         assert result is True
         assert t.id in agent.active_tasks
+
+
+# ---------------------------------------------------------------------------
+# Second round of hardening tests (10 more)
+# ---------------------------------------------------------------------------
+
+class TestTaskDictTimestamps:
+    def test_to_dict_timestamps_after_completion(self):
+        """to_dict exposes assigned_at/started_at/completed_at after a full run."""
+        t = Task(description="lifecycle")
+        t.transition_to(TaskStatus.ASSIGNED)
+        t.transition_to(TaskStatus.RUNNING)
+        t.transition_to(TaskStatus.COMPLETED)
+        d = t.to_dict()
+        assert d["assigned_at"] is not None
+        assert d["started_at"] is not None
+        assert d["completed_at"] is not None
+        assert d["status"] == "completed"
+
+    def test_to_dict_preserves_parameters_and_metadata(self):
+        """to_dict round-trips arbitrary parameters and metadata."""
+        t = Task(description="params", parameters={"x": 1}, metadata={"tag": "test"})
+        d = t.to_dict()
+        assert d["parameters"] == {"x": 1}
+        assert d["metadata"] == {"tag": "test"}
+
+
+class TestTaskCancellation:
+    def test_assigned_to_cancelled(self, task):
+        task.transition_to(TaskStatus.ASSIGNED)
+        assert task.transition_to(TaskStatus.CANCELLED) is True
+        assert task.status == TaskStatus.CANCELLED
+        assert task.completed_at is not None
+
+    def test_running_to_cancelled(self, task):
+        task.transition_to(TaskStatus.ASSIGNED)
+        task.transition_to(TaskStatus.RUNNING)
+        assert task.transition_to(TaskStatus.CANCELLED) is True
+        assert task.status == TaskStatus.CANCELLED
+
+    def test_cancelled_is_terminal(self, task):
+        task.transition_to(TaskStatus.CANCELLED)
+        assert task.transition_to(TaskStatus.ASSIGNED) is False
+        assert task.status == TaskStatus.CANCELLED
+
+
+class TestAgentCapabilityRepr:
+    def test_repr_contains_name_and_version(self):
+        cap = AgentCapability(name="compute", description="do math", version="2.0.0")
+        r = repr(cap)
+        assert "compute" in r
+        assert "2.0.0" in r
+
+
+class TestOrchestratorAgentBehaviour:
+    def test_think_returns_expected_keys(self):
+        orch = OrchestratorAgent("orch-think")
+        result = orch.think({"task": "x"})
+        assert "analysis" in result
+        assert "execution_strategy" in result
+
+    def test_act_returns_orchestration_complete(self):
+        orch = OrchestratorAgent("orch-act")
+        result = orch.act({"execution_strategy": "parallel"})
+        assert result.get("status") == "orchestration_complete"
+
+    def test_get_system_status_structure(self):
+        orch = OrchestratorAgent("orch-status")
+        agent = ExecutorAgent("e1")
+        orch.register_agent(agent)
+        status = orch.get_system_status()
+        assert "orchestrator" in status
+        assert "managed_agents" in status
+        assert "total_agents" in status
+        assert status["total_agents"] == 1
+
+
+class TestExecutorAgentHistory:
+    def test_execution_history_grows_after_run(self, executor, task):
+        executor.assign_task(task)
+        executor.execute_task(task)
+        assert len(executor.execution_history) == 1
+        entry = executor.execution_history[0]
+        assert "timestamp" in entry
+        assert entry["result"] == "executed"
+
+
+class TestLearnerAgentDetails:
+    def test_think_returns_learning_mode(self):
+        agent = LearnerAgent("l-think")
+        result = agent.think({"signal": 1})
+        assert result.get("learning_mode") is True
+        assert "patterns_identified" in result
+
+    def test_act_populates_learning_history(self):
+        agent = LearnerAgent("l-act")
+        agent.act({"learning_mode": True})
+        assert len(agent.learning_history) == 1
+        entry = agent.learning_history[0]
+        assert "timestamp" in entry
+        assert "decision" in entry
+
+
+class TestAgentSystemSubmitEdgeCases:
+    def test_submit_task_returns_false_for_unknown_agent_id(self, system):
+        t = system.create_task("edge", {})
+        result = system.submit_task(t, agent_id="no-such-agent")
+        assert result is False
