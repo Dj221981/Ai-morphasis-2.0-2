@@ -7,7 +7,12 @@ CONFIG_PATH = REPO_ROOT / "agents" / "cerribro" / "agent_config.json"
 
 
 def load_cerribro_config() -> dict:
-    return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    try:
+        return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise AssertionError(f"Cerribro config not found at {CONFIG_PATH}") from exc
+    except json.JSONDecodeError as exc:
+        raise AssertionError(f"Cerribro config contains invalid JSON: {exc}") from exc
 
 
 def test_cerribro_coding_tools_profile_exists() -> None:

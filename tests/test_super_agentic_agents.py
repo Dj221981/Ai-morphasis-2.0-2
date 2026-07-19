@@ -330,7 +330,7 @@ class TestBaseAgent:
         agent.assign_task(t)
         with pytest.raises(RuntimeError):
             agent.execute_task(t)
-        assert t.retry_count == 2  # not incremented beyond max_retries
+        assert t.retry_count == 2  # equals max_retries at exhaustion
         assert t.status == TaskStatus.FAILED
 
     def test_active_task_cleaned_up_on_success(self, executor, task):
