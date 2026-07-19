@@ -22,6 +22,9 @@ def test_cerribro_coding_tools_profile_exists() -> None:
     assert "coding_tools" in config
     assert isinstance(config["coding_tools"], dict) and config["coding_tools"]
 
+    coding_tools = config["coding_tools"]
+    assert coding_tools["enabled"] is True
+    assert (REPO_ROOT / coding_tools["policy_file"]).exists()
 
 def test_coding_tools_activation_rules_cover_required_modes() -> None:
     activation_rules = load_cerribro_config()["coding_tools"]["activation_rules"]
