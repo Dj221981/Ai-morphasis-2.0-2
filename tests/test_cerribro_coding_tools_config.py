@@ -15,6 +15,7 @@ def test_cerribro_coding_tools_profile_exists() -> None:
     config = load_cerribro_config()
     assert config["agent_name"] == "cerribro"
     assert "coding_tools" in config
+    assert isinstance(config["coding_tools"], dict) and config["coding_tools"]
 
 
 def test_coding_tools_activation_rules_cover_required_modes() -> None:

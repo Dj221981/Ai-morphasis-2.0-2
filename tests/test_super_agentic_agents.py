@@ -326,7 +326,7 @@ class TestBaseAgent:
         assert t.retry_count == 2
         assert t.status == TaskStatus.RETRYING
 
-        # One more — exhausts retries
+        # One more -- exhausts retries
         agent.assign_task(t)
         with pytest.raises(RuntimeError):
             agent.execute_task(t)
