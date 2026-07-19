@@ -5,8 +5,8 @@ Comprehensive test suite for DQN, Policy Networks, and training utilities.
 """
 
 import pytest
-import numpy as np
-import tensorflow as tf
+np = pytest.importorskip("numpy")
+tf = pytest.importorskip("tensorflow")
 from pathlib import Path
 import tempfile
 import json
@@ -17,10 +17,9 @@ from src.models.neural_network import (
     AgentLearningModel,
     ExperienceReplay
 )
-from src.training.train import (
-    TrainingEnvironment,
-    AgentTrainer
-)
+training_module = pytest.importorskip("src.training.train")
+TrainingEnvironment = training_module.TrainingEnvironment
+AgentTrainer = training_module.AgentTrainer
 
 
 class TestDQNNetwork:

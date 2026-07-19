@@ -26,6 +26,13 @@ When Cerribro receives concrete code tasks, it follows the coding-tools profile 
 
 Cerribro should provide evidence for coding claims with available checks (lint, type checks, tests, or execution logs), and clearly mark assumptions as unverified when execution is not possible.
 
+### Production readiness expectations
+
+- Include a release-readiness checklist in coding task summaries.
+- Run dependency vulnerability checks before introducing new dependencies.
+- Run secret scanning before commit.
+- Treat green CI as a release gate.
+
 ## Customization
 
 Update `agents/cerribro/agent_config.json` to customize:

@@ -82,7 +82,8 @@
       "change_rationale",
       "risk_notes",
       "verification_output_summary",
-      "rollback_or_fallback_note_if_checks_fail"
+      "rollback_or_fallback_note_if_checks_fail",
+      "release_readiness_checklist"
     ],
     "guardrails": {
       "read_before_edit": true,
@@ -90,7 +91,10 @@
       "deny_large_refactor_without_request": true,
       "require_verification_evidence_for_code_claims": true,
       "mark_unverified_assumptions": true,
-      "deny_unsafe_or_malicious_requests": true
+      "deny_unsafe_or_malicious_requests": true,
+      "require_dependency_vulnerability_check_on_new_packages": true,
+      "require_secret_scan_before_commit": true,
+      "require_ci_green_for_release": true
     },
     "output_contract": [
       "objective",
