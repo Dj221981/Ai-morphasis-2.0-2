@@ -1,0 +1,263 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/Dj221981/Ai-morphasis-2.0-2/agents/cerribro/evidence_schema.json",
+  "title": "CerribroEvidenceBundle",
+  "description": "Schema for the evidence bundle produced by Cerribro's Deep Research layer.",
+  "type": "object",
+  "anyOf": [
+    { "required": ["evidence_bundle"] },
+    {
+      "required": [
+        "research_questions",
+        "evidence_records",
+        "contradictions",
+        "evidence_map",
+        "freshness_warnings",
+        "synthesis_confidence"
+      ]
+    }
+  ],
+  "properties": {
+    "research_questions": { "$ref": "#/properties/evidence_bundle/properties/research_questions" },
+    "evidence_records": { "$ref": "#/properties/evidence_bundle/properties/evidence_records" },
+    "contradictions": { "$ref": "#/properties/evidence_bundle/properties/contradictions" },
+    "evidence_map": { "$ref": "#/properties/evidence_bundle/properties/evidence_map" },
+    "freshness_warnings": { "$ref": "#/properties/evidence_bundle/properties/freshness_warnings" },
+    "synthesis_confidence": { "$ref": "#/properties/evidence_bundle/properties/synthesis_confidence" },
+    "evidence_bundle": {
+      "type": "object",
+      "required": [
+        "research_questions",
+        "evidence_records",
+        "contradictions",
+        "evidence_map",
+        "freshness_warnings",
+        "synthesis_confidence"
+      ],
+      "properties": {
+
+        "research_questions": {
+          "type": "array",
+          "description": "List of targeted research questions derived from the user request.",
+          "items": {
+            "type": "object",
+            "required": ["id", "text", "type", "time_sensitive"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^RQ-[0-9]+$",
+                "description": "Unique identifier, e.g. RQ-01."
+              },
+              "text": {
+                "type": "string",
+                "description": "Full text of the research question."
+              },
+              "type": {
+                "type": "string",
+                "enum": ["FACTUAL", "COMPARATIVE", "PROCEDURAL", "EVALUATIVE"],
+                "description": "Question type."
+              },
+              "time_sensitive": {
+                "type": "boolean",
+                "description": "True if the answer may have changed since knowledge cutoff."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+
+        "evidence_records": {
+          "type": "array",
+          "description": "Individual pieces of evidence gathered to answer research questions.",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "source_title",
+              "category",
+              "tier",
+              "claim",
+              "relevance_to",
+              "confidence",
+              "citation"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^EV-[0-9]+$",
+                "description": "Unique identifier, e.g. EV-01."
+              },
+              "source_title": {
+                "type": "string",
+                "description": "Human-readable title of the source."
+              },
+              "source_url": {
+                "type": ["string", "null"],
+                "format": "uri",
+                "description": "URL of the source, or null if unavailable."
+              },
+              "category": {
+                "type": "string",
+                "enum": [
+                  "Primary official",
+                  "Peer-reviewed",
+                  "Community",
+                  "Blog / Tutorial",
+                  "Training knowledge"
+                ],
+                "description": "Source category as defined in deep_research.md Section 2."
+              },
+              "tier": {
+                "type": "integer",
+                "enum": [1, 2, 3, 4],
+                "description": "Quality tier (1 = highest). Tier 4 sources are discarded."
+              },
+              "claim": {
+                "type": "string",
+                "description": "The exact claim extracted from this source."
+              },
+              "relevance_to": {
+                "type": "string",
+                "pattern": "^RQ-[0-9]+$",
+                "description": "ID of the research question this evidence addresses."
+              },
+              "confidence": {
+                "type": "string",
+                "enum": ["High", "Medium", "Low", "Uncertain"],
+                "description": "Confidence band for this evidence record."
+              },
+              "last_seen": {
+                "type": ["string", "null"],
+                "description": "ISO 8601 date when source was last known accurate, or null."
+              },
+              "citation": {
+                "type": "string",
+                "description": "Formatted citation string: '[EV-NN] <title> — <url or note>'."
+              },
+              "quality_scores": {
+                "type": "object",
+                "description": "Optional per-dimension quality scores (1–5 each).",
+                "properties": {
+                  "authority":      { "type": "number", "minimum": 1, "maximum": 5 },
+                  "recency":        { "type": "number", "minimum": 1, "maximum": 5 },
+                  "specificity":    { "type": "number", "minimum": 1, "maximum": 5 },
+                  "verifiability":  { "type": "number", "minimum": 1, "maximum": 5 },
+                  "composite":      { "type": "number", "minimum": 1, "maximum": 5 }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+
+        "contradictions": {
+          "type": "array",
+          "description": "Pairs of evidence records with conflicting claims.",
+          "items": {
+            "type": "object",
+            "required": ["ev_a", "ev_b", "claim_a", "claim_b", "resolution", "final_claim"],
+            "properties": {
+              "ev_a": {
+                "type": "string",
+                "pattern": "^EV-[0-9]+$"
+              },
+              "ev_b": {
+                "type": "string",
+                "pattern": "^EV-[0-9]+$"
+              },
+              "claim_a": { "type": "string" },
+              "claim_b": { "type": "string" },
+              "resolution": {
+                "type": "string",
+                "enum": ["RECENCY_WINS", "AUTHORITY_WINS", "UNRESOLVED"],
+                "description": "How the contradiction was resolved."
+              },
+              "winning_ev": {
+                "type": ["string", "null"],
+                "pattern": "^EV-[0-9]+$",
+                "description": "The evidence record that won the resolution, or null if UNRESOLVED."
+              },
+              "final_claim": {
+                "type": "string",
+                "description": "The claim accepted after resolution, or a description of the unresolved dispute."
+              },
+              "confidence_delta": {
+                "type": "number",
+                "description": "Adjustment applied to synthesis confidence due to this contradiction."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+
+        "evidence_map": {
+          "type": "object",
+          "description": "Maps each conclusion label to the evidence record IDs that support it.",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^EV-[0-9]+$"
+            }
+          }
+        },
+
+        "freshness_warnings": {
+          "type": "array",
+          "description": "Warnings for time-sensitive claims with potentially stale evidence.",
+          "items": {
+            "type": "object",
+            "required": ["research_question_id", "most_recent_evidence_date", "message"],
+            "properties": {
+              "research_question_id": {
+                "type": "string",
+                "pattern": "^RQ-[0-9]+$"
+              },
+              "most_recent_evidence_date": {
+                "type": ["string", "null"],
+                "description": "ISO 8601 date of the most recent evidence, or null if unknown."
+              },
+              "message": {
+                "type": "string",
+                "description": "Human-readable freshness warning message."
+              },
+              "confidence_delta": {
+                "type": "number",
+                "description": "Negative adjustment applied to synthesis confidence."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+
+        "synthesis_confidence": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Aggregate confidence score for the synthesised answer (0–1)."
+        },
+
+        "synthesis_confidence_band": {
+          "type": "string",
+          "enum": ["High", "Medium", "Low", "Uncertain"],
+          "description": "Band label corresponding to synthesis_confidence."
+        },
+
+        "insufficient_evidence": {
+          "type": "boolean",
+          "description": "True if minimum evidence threshold was not met. Response must use the insufficient-evidence format.",
+          "default": false
+        },
+
+        "unverified_claims": {
+          "type": "array",
+          "description": "Claims that could not be backed by any evidence record.",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

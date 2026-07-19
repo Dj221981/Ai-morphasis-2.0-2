@@ -26,6 +26,8 @@ I thrive on solving complex problems and building scalable, production-grade app
 
 - **[Ai-morphasis 2.0](https://github.com/Dj221981/Ai-morphasis-2.0-2)** — A cutting-edge AI system with comprehensive testing, advanced CI/CD pipelines, and multi-version Python support. Features professional-grade linting, code coverage tracking, and specialized DeepMind tool integration.
 
+- **[Cerribro — Specialist Agent](agents/cerribro/README.md)** — A grounded specialist AI for app building, game development, and coding assistance. Features deep intelligence planning, deep research with evidence bundles, and a DeepMind-style hypothesis/experiment/evaluation loop.
+
 ## 📊 GitHub Activity
 
 ![GitHub Stats](https://github-readme-stats.vercel.app/api?username=Dj221981&show_icons=true&theme=dark)
