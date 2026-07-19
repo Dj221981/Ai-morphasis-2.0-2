@@ -107,7 +107,7 @@ print(f"Using device: {config.model_device}")
 Cerribro has a mode-aware coding tools profile configuration:
 
 - Base profile + optional deep-upgrade toggles
-- Coding tool activation rules (`coding_assistant`, `app_builder`, `game_builder`)
+- Coding tool activation rules (`coding_assistant`, `app_builder`, `game_builder`, `conceptual_only`)
 - Deterministic coding workflow pipeline
 - Guardrails and required verification artifacts
 - Final output contract for coding tasks
