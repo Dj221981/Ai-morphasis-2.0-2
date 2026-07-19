@@ -1,0 +1,640 @@
+"""
+Unit tests for src/agents/super_agentic_agents.py
+
+Covers:
+- Task state-transition model (valid/invalid transitions, timestamps)
+- AgentMemory (store, retrieve, FIFO eviction, semantic access_count)
+- BaseAgent behaviour via ExecutorAgent
+  - capability registration and limit enforcement
+  - task assignment (capacity, state validation)
+  - successful task execution path
+  - failed task execution path (retry transitions, failure transitions)
+  - _force_task_status fallback helper
+  - active-task cleanup in finally block
+- OrchestratorAgent (register_agent, _select_best_agent, distribute_task)
+- AgentSystem
+  - add_agent / remove_agent (including relationship cleanup)
+  - create_task (validates empty description)
+  - submit_task
+  - execute_task (success/failure system metrics, retry requeue deduplication)
+- AgentFactory (create_agent, create_team)
+- AgentCapability validation (__post_init__)
+"""
+
+import pytest
+from unittest.mock import patch
+
+from src.agents.super_agentic_agents import (
+    AgentCapability,
+    AgentMemory,
+    AgentRole,
+    AgentStatus,
+    AgentSystem,
+    AgentFactory,
+    AnalyzerAgent,
+    BaseAgent,
+    ExecutorAgent,
+    LearnerAgent,
+    OrchestratorAgent,
+    Task,
+    TaskPriority,
+    TaskStatus,
+)
+
+
+# ---------------------------------------------------------------------------
+# Helpers / fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def task():
+    return Task(description="test task")
+
+
+@pytest.fixture
+def executor():
+    return ExecutorAgent("exec-1")
+
+
+@pytest.fixture
+def system():
+    return AgentSystem("test-system")
+
+
+# ---------------------------------------------------------------------------
+# AgentCapability validation
+# ---------------------------------------------------------------------------
+
+class TestAgentCapabilityValidation:
+    def test_valid_capability(self):
+        cap = AgentCapability(name="cap", description="desc", confidence_score=0.5)
+        assert cap.name == "cap"
+        assert cap.confidence_score == 0.5
+
+    def test_empty_name_raises(self):
+        with pytest.raises(ValueError, match="name must not be empty"):
+            AgentCapability(name="", description="desc")
+
+    def test_whitespace_name_raises(self):
+        with pytest.raises(ValueError, match="name must not be empty"):
+            AgentCapability(name="   ", description="desc")
+
+    def test_confidence_score_below_zero_raises(self):
+        with pytest.raises(ValueError, match="confidence_score"):
+            AgentCapability(name="cap", description="desc", confidence_score=-0.1)
+
+    def test_confidence_score_above_one_raises(self):
+        with pytest.raises(ValueError, match="confidence_score"):
+            AgentCapability(name="cap", description="desc", confidence_score=1.1)
+
+    def test_confidence_score_boundary_values(self):
+        cap_low = AgentCapability(name="c1", description="d", confidence_score=0.0)
+        cap_high = AgentCapability(name="c2", description="d", confidence_score=1.0)
+        assert cap_low.confidence_score == 0.0
+        assert cap_high.confidence_score == 1.0
+
+
+# ---------------------------------------------------------------------------
+# Task state transitions
+# ---------------------------------------------------------------------------
+
+class TestTaskTransitions:
+    def test_pending_to_assigned(self, task):
+        assert task.transition_to(TaskStatus.ASSIGNED) is True
+        assert task.status == TaskStatus.ASSIGNED
+        assert task.assigned_at is not None
+
+    def test_assigned_to_running(self, task):
+        task.transition_to(TaskStatus.ASSIGNED)
+        assert task.transition_to(TaskStatus.RUNNING) is True
+        assert task.status == TaskStatus.RUNNING
+        assert task.started_at is not None
+
+    def test_running_to_completed(self, task):
+        task.transition_to(TaskStatus.ASSIGNED)
+        task.transition_to(TaskStatus.RUNNING)
+        assert task.transition_to(TaskStatus.COMPLETED) is True
+        assert task.status == TaskStatus.COMPLETED
+        assert task.completed_at is not None
+
+    def test_running_to_retrying(self, task):
+        task.transition_to(TaskStatus.ASSIGNED)
+        task.transition_to(TaskStatus.RUNNING)
+        assert task.transition_to(TaskStatus.RETRYING) is True
+        assert task.status == TaskStatus.RETRYING
+        assert task.last_retry_at is not None
+
+    def test_running_to_failed(self, task):
+        task.transition_to(TaskStatus.ASSIGNED)
+        task.transition_to(TaskStatus.RUNNING)
+        assert task.transition_to(TaskStatus.FAILED) is True
+        assert task.status == TaskStatus.FAILED
+        assert task.completed_at is not None
+
+    def test_invalid_pending_to_completed(self, task):
+        assert task.transition_to(TaskStatus.COMPLETED) is False
+        assert task.status == TaskStatus.PENDING
+
+    def test_invalid_pending_to_running(self, task):
+        assert task.transition_to(TaskStatus.RUNNING) is False
+
+    def test_completed_is_terminal(self, task):
+        task.transition_to(TaskStatus.ASSIGNED)
+        task.transition_to(TaskStatus.RUNNING)
+        task.transition_to(TaskStatus.COMPLETED)
+        assert task.transition_to(TaskStatus.RUNNING) is False
+        assert task.status == TaskStatus.COMPLETED
+
+    def test_failed_is_terminal(self, task):
+        task.transition_to(TaskStatus.ASSIGNED)
+        task.transition_to(TaskStatus.RUNNING)
+        task.transition_to(TaskStatus.FAILED)
+        assert task.transition_to(TaskStatus.RETRYING) is False
+
+    def test_retrying_to_running(self, task):
+        task.transition_to(TaskStatus.ASSIGNED)
+        task.transition_to(TaskStatus.RUNNING)
+        task.transition_to(TaskStatus.RETRYING)
+        assert task.transition_to(TaskStatus.RUNNING) is True
+
+    def test_pending_to_cancelled(self, task):
+        assert task.transition_to(TaskStatus.CANCELLED) is True
+        assert task.completed_at is not None
+
+    def test_to_dict_roundtrip(self, task):
+        d = task.to_dict()
+        assert d["status"] == "pending"
+        assert d["description"] == "test task"
+        assert d["retry_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# AgentMemory
+# ---------------------------------------------------------------------------
+
+class TestAgentMemory:
+    def test_store_and_retrieve_episodic(self):
+        mem = AgentMemory(agent_id="a1")
+        mem.store_episode("k1", "v1")
+        assert mem.retrieve("k1", "episodic") == "v1"
+
+    def test_retrieve_missing_key_returns_none(self):
+        mem = AgentMemory(agent_id="a1")
+        assert mem.retrieve("nope") is None
+
+    def test_fifo_eviction(self):
+        mem = AgentMemory(agent_id="a1", max_episodes=2)
+        mem.store_episode("k1", "v1")
+        mem.store_episode("k2", "v2")
+        mem.store_episode("k3", "v3")
+
+        assert mem.retrieve("k1", "episodic") is None  # evicted
+        assert mem.retrieve("k2", "episodic") == "v2"
+        assert mem.retrieve("k3", "episodic") == "v3"
+
+    def test_store_semantic(self):
+        mem = AgentMemory(agent_id="a1")
+        mem.store_semantic("fact1", "Earth is round")
+        assert mem.retrieve("fact1", "semantic") == "Earth is round"
+
+    def test_semantic_access_count_increments(self):
+        mem = AgentMemory(agent_id="a1")
+        mem.store_semantic("fact1", "value")
+        mem.retrieve("fact1", "semantic")
+        mem.retrieve("fact1", "semantic")
+        assert mem.semantic_memory["fact1"]["access_count"] == 2
+
+    def test_auto_mode_prefers_episodic(self):
+        mem = AgentMemory(agent_id="a1")
+        mem.store_episode("k", "episodic_val")
+        mem.store_semantic("k", "semantic_val")
+        assert mem.retrieve("k", "auto") == "episodic_val"
+
+
+# ---------------------------------------------------------------------------
+# BaseAgent / ExecutorAgent
+# ---------------------------------------------------------------------------
+
+class TestBaseAgent:
+    def test_register_capability(self, executor):
+        cap = AgentCapability(name="run", description="run stuff")
+        assert executor.register_capability(cap) is True
+        assert "run" in executor.capabilities
+
+    def test_capability_limit_enforced(self):
+        agent = ExecutorAgent("limited")
+        agent.max_capabilities = 2
+        agent.register_capability(AgentCapability(name="c1", description="d"))
+        agent.register_capability(AgentCapability(name="c2", description="d"))
+        assert agent.register_capability(AgentCapability(name="c3", description="d")) is False
+        assert len(agent.capabilities) == 2
+
+    def test_assign_pending_task(self, executor, task):
+        assert executor.assign_task(task) is True
+        assert task.status == TaskStatus.ASSIGNED
+        assert task.id in executor.active_tasks
+
+    def test_assign_retrying_task(self, executor, task):
+        task.transition_to(TaskStatus.ASSIGNED)
+        task.transition_to(TaskStatus.RUNNING)
+        task.transition_to(TaskStatus.RETRYING)
+        assert executor.assign_task(task) is True
+        assert task.id in executor.active_tasks
+
+    def test_assign_rejected_at_capacity(self):
+        agent = ExecutorAgent("capped")
+        agent.max_active_tasks = 1
+        t1 = Task(description="t1")
+        t2 = Task(description="t2")
+        agent.assign_task(t1)
+        assert agent.assign_task(t2) is False
+
+    def test_assign_rejected_invalid_state(self, executor, task):
+        task.transition_to(TaskStatus.ASSIGNED)
+        task.transition_to(TaskStatus.RUNNING)
+        task.transition_to(TaskStatus.COMPLETED)
+        assert executor.assign_task(task) is False
+
+    def test_get_status_shape(self, executor):
+        status = executor.get_status()
+        for key in ("id", "name", "role", "status", "capabilities",
+                    "active_tasks", "completed_tasks", "performance"):
+            assert key in status
+
+    def test_successful_execution(self, executor, task):
+        executor.assign_task(task)
+        result = executor.execute_task(task)
+
+        assert task.status == TaskStatus.COMPLETED
+        assert result["execution"] == "successful"
+        assert executor.performance_metrics["tasks_completed"] == 1
+        assert executor.performance_metrics["tasks_failed"] == 0
+        assert task.id not in executor.active_tasks  # cleaned up
+
+    def test_failed_execution_no_retries(self):
+        class BoomAgent(ExecutorAgent):
+            def act(self, decision):
+                raise RuntimeError("boom")
+
+        agent = BoomAgent("boom")
+        t = Task(description="fail", max_retries=0)
+        agent.assign_task(t)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            agent.execute_task(t)
+
+        assert t.status == TaskStatus.FAILED
+        assert t.completed_at is not None
+        assert agent.performance_metrics["tasks_failed"] == 1
+        assert t.id not in agent.active_tasks  # always cleaned up
+
+    def test_failed_execution_with_retries(self):
+        class BoomAgent(ExecutorAgent):
+            def act(self, decision):
+                raise RuntimeError("transient")
+
+        agent = BoomAgent("retry-agent")
+        t = Task(description="retryable", max_retries=3)
+        agent.assign_task(t)
+
+        with pytest.raises(RuntimeError):
+            agent.execute_task(t)
+
+        assert t.status == TaskStatus.RETRYING
+        assert t.retry_count == 1
+        assert t.last_retry_at is not None
+        assert t.id not in agent.active_tasks
+
+    def test_retry_count_increments_on_repeated_failures(self):
+        class BoomAgent(ExecutorAgent):
+            def act(self, decision):
+                raise RuntimeError("always fails")
+
+        agent = BoomAgent("counter")
+        t = Task(description="counter", max_retries=2)
+
+        agent.assign_task(t)
+        with pytest.raises(RuntimeError):
+            agent.execute_task(t)
+        assert t.retry_count == 1
+        assert t.status == TaskStatus.RETRYING
+
+        # Re-assign for next retry
+        agent.assign_task(t)
+        with pytest.raises(RuntimeError):
+            agent.execute_task(t)
+        assert t.retry_count == 2
+        assert t.status == TaskStatus.RETRYING
+
+        # One more — exhausts retries
+        agent.assign_task(t)
+        with pytest.raises(RuntimeError):
+            agent.execute_task(t)
+        assert t.retry_count == 2  # not incremented beyond max_retries
+        assert t.status == TaskStatus.FAILED
+
+    def test_active_task_cleaned_up_on_success(self, executor, task):
+        executor.assign_task(task)
+        assert task.id in executor.active_tasks
+        executor.execute_task(task)
+        assert task.id not in executor.active_tasks
+
+    def test_active_task_cleaned_up_on_failure(self):
+        class BoomAgent(ExecutorAgent):
+            def act(self, decision):
+                raise RuntimeError("cleanup-test")
+
+        agent = BoomAgent("cleanup")
+        t = Task(description="cleanup", max_retries=0)
+        agent.assign_task(t)
+        assert t.id in agent.active_tasks
+
+        with pytest.raises(RuntimeError):
+            agent.execute_task(t)
+
+        assert t.id not in agent.active_tasks
+
+    def test_force_task_status_retrying(self, executor, task):
+        """_force_task_status sets status and timestamps correctly."""
+        task.transition_to(TaskStatus.ASSIGNED)
+        executor._force_task_status(task, TaskStatus.RETRYING)
+        assert task.status == TaskStatus.RETRYING
+        assert task.last_retry_at is not None
+
+    def test_force_task_status_failed(self, executor, task):
+        task.transition_to(TaskStatus.ASSIGNED)
+        executor._force_task_status(task, TaskStatus.FAILED)
+        assert task.status == TaskStatus.FAILED
+        assert task.completed_at is not None
+
+
+# ---------------------------------------------------------------------------
+# OrchestratorAgent
+# ---------------------------------------------------------------------------
+
+class TestOrchestratorAgent:
+    def test_register_agent_sets_parent(self):
+        orch = OrchestratorAgent("orch")
+        agent = ExecutorAgent("exec")
+        orch.register_agent(agent)
+        assert agent.id in orch.managed_agents
+        assert agent.parent_agent == orch.id
+
+    def test_select_best_agent_prefers_less_busy(self):
+        orch = OrchestratorAgent("orch")
+        a1 = ExecutorAgent("a1")
+        a2 = ExecutorAgent("a2")
+        orch.register_agent(a1)
+        orch.register_agent(a2)
+
+        # Assign one task to a1 to make it busier
+        t = Task(description="busy")
+        a1.assign_task(t)
+
+        best = orch._select_best_agent(Task(description="new"))
+        assert best is a2
+
+    def test_select_best_agent_skips_suspended(self):
+        orch = OrchestratorAgent("orch")
+        a1 = ExecutorAgent("a1")
+        orch.register_agent(a1)
+        a1.status = AgentStatus.SUSPENDED
+
+        best = orch._select_best_agent(Task(description="new"))
+        assert best is None
+
+    def test_distribute_task_to_explicit_target(self):
+        orch = OrchestratorAgent("orch")
+        agent = ExecutorAgent("exec")
+        orch.register_agent(agent)
+        t = Task(description="explicit")
+        result = orch.distribute_task(t, target_agent_id=agent.id)
+        assert result is True
+        assert t.id in agent.active_tasks
+
+    def test_distribute_task_auto_selects(self):
+        orch = OrchestratorAgent("orch")
+        agent = ExecutorAgent("exec")
+        orch.register_agent(agent)
+        t = Task(description="auto")
+        result = orch.distribute_task(t)
+        assert result is True
+
+    def test_distribute_task_returns_false_when_no_agent(self):
+        orch = OrchestratorAgent("orch")
+        t = Task(description="no-agent")
+        assert orch.distribute_task(t) is False
+
+
+# ---------------------------------------------------------------------------
+# AgentSystem
+# ---------------------------------------------------------------------------
+
+class TestAgentSystem:
+    def test_add_agent(self, system):
+        agent = ExecutorAgent("e1")
+        assert system.add_agent(agent) is True
+        assert agent.id in system.agents
+        assert agent.id in system.orchestrator.managed_agents
+        assert system.system_metrics["total_agents"] == 2  # orchestrator + e1
+
+    def test_remove_agent_basic(self, system):
+        agent = ExecutorAgent("e1")
+        system.add_agent(agent)
+        assert system.remove_agent(agent.id) is True
+        assert agent.id not in system.agents
+        assert system.system_metrics["total_agents"] == 1  # only orchestrator left
+
+    def test_remove_agent_cleans_managed_agents(self, system):
+        agent = ExecutorAgent("e1")
+        system.add_agent(agent)
+        system.remove_agent(agent.id)
+        assert agent.id not in system.orchestrator.managed_agents
+
+    def test_remove_agent_clears_parent_reference(self, system):
+        agent = ExecutorAgent("e1")
+        system.add_agent(agent)
+        assert agent.parent_agent == system.orchestrator.id
+        system.remove_agent(agent.id)
+        assert agent.parent_agent is None
+
+    def test_remove_agent_clears_peer_references(self, system):
+        a1 = ExecutorAgent("a1")
+        a2 = ExecutorAgent("a2")
+        system.add_agent(a1)
+        system.add_agent(a2)
+        # Manually wire peer relationship
+        a1.peer_agents.add(a2.id)
+        a2.peer_agents.add(a1.id)
+
+        system.remove_agent(a1.id)
+
+        assert a1.id not in a2.peer_agents
+        assert len(a1.peer_agents) == 0
+
+    def test_remove_agent_clears_child_parent_reference(self, system):
+        parent = ExecutorAgent("parent")
+        child = ExecutorAgent("child")
+        system.add_agent(parent)
+        system.add_agent(child)
+        # Wire parent->child relationship
+        parent.child_agents.add(child.id)
+        child.parent_agent = parent.id
+
+        system.remove_agent(parent.id)
+
+        assert child.parent_agent is None
+
+    def test_remove_nonexistent_agent(self, system):
+        assert system.remove_agent("nonexistent") is False
+
+    def test_create_task(self, system):
+        t = system.create_task("do something", {"k": "v"})
+        assert t.id in system.task_registry
+        assert any(x.id == t.id for x in system.global_task_queue)
+        assert system.system_metrics["total_tasks"] == 1
+
+    def test_create_task_empty_description_raises(self, system):
+        with pytest.raises(ValueError, match="description must not be empty"):
+            system.create_task("", {})
+
+    def test_create_task_whitespace_description_raises(self, system):
+        with pytest.raises(ValueError, match="description must not be empty"):
+            system.create_task("   ", {})
+
+    def test_submit_task_removes_from_global_queue(self, system):
+        agent = ExecutorAgent("exec")
+        system.add_agent(agent)
+        t = system.create_task("submit-test", {})
+        assert any(x.id == t.id for x in system.global_task_queue)
+        system.submit_task(t, agent.id)
+        assert not any(x.id == t.id for x in system.global_task_queue)
+
+    def test_execute_task_success_updates_metrics(self, system):
+        agent = ExecutorAgent("exec")
+        system.add_agent(agent)
+        t = system.create_task("run", {})
+        system.submit_task(t, agent.id)
+        system.execute_task(t.id, agent.id)
+        assert system.system_metrics["successful_tasks"] == 1
+        assert t in system.completed_tasks
+
+    def test_execute_task_failure_updates_metrics(self, system):
+        class BoomAgent(ExecutorAgent):
+            def act(self, decision):
+                raise RuntimeError("fail")
+
+        agent = BoomAgent("boom")
+        agent.max_retries = 0
+        system.add_agent(agent)
+        t = system.create_task("fail-task", {})
+        t.max_retries = 0
+        system.submit_task(t, agent.id)
+
+        with pytest.raises(RuntimeError):
+            system.execute_task(t.id, agent.id)
+
+        assert system.system_metrics["failed_tasks"] == 1
+
+    def test_execute_task_retry_requeues(self, system):
+        class BoomAgent(ExecutorAgent):
+            def act(self, decision):
+                raise RuntimeError("retry-me")
+
+        agent = BoomAgent("retry-exec")
+        system.add_agent(agent)
+        t = system.create_task("retry-task", {})
+        t.max_retries = 2
+        system.submit_task(t, agent.id)
+
+        with pytest.raises(RuntimeError):
+            system.execute_task(t.id, agent.id)
+
+        assert t.status == TaskStatus.RETRYING
+        assert any(x.id == t.id for x in system.global_task_queue)
+
+    def test_execute_task_retry_no_duplicate_requeue(self, system):
+        """Calling execute_task twice on a retrying task must not add duplicates."""
+        class BoomAgent(ExecutorAgent):
+            def act(self, decision):
+                raise RuntimeError("dup-test")
+
+        agent = BoomAgent("dup-agent")
+        system.add_agent(agent)
+        t = system.create_task("dup-task", {})
+        t.max_retries = 5
+        system.submit_task(t, agent.id)
+
+        # First failure → requeued
+        with pytest.raises(RuntimeError):
+            system.execute_task(t.id, agent.id)
+
+        queue_count = sum(1 for x in system.global_task_queue if x.id == t.id)
+        assert queue_count == 1
+
+        # Second failure without draining the queue → still only one entry
+        agent.assign_task(t)
+        with pytest.raises(RuntimeError):
+            system.execute_task(t.id, agent.id)
+
+        queue_count = sum(1 for x in system.global_task_queue if x.id == t.id)
+        assert queue_count == 1
+
+    def test_execute_task_unknown_agent_raises(self, system):
+        t = system.create_task("task", {})
+        with pytest.raises(ValueError, match="not found"):
+            system.execute_task(t.id, "bad-agent-id")
+
+    def test_execute_task_unknown_task_raises(self, system):
+        agent = ExecutorAgent("exec")
+        system.add_agent(agent)
+        with pytest.raises(ValueError, match="not found"):
+            system.execute_task("bad-task-id", agent.id)
+
+    def test_get_system_status(self, system):
+        status = system.get_system_status()
+        assert "agents" in status
+        assert "metrics" in status
+        assert "pending_tasks" in status
+
+
+# ---------------------------------------------------------------------------
+# AgentFactory
+# ---------------------------------------------------------------------------
+
+class TestAgentFactory:
+    def test_create_executor(self):
+        agent = AgentFactory.create_agent("executor", "Exec-1")
+        assert isinstance(agent, ExecutorAgent)
+        assert agent.name == "Exec-1"
+
+    def test_create_analyzer(self):
+        agent = AgentFactory.create_agent("analyzer", "An-1")
+        assert isinstance(agent, AnalyzerAgent)
+
+    def test_create_learner(self):
+        agent = AgentFactory.create_agent("learner", "Le-1")
+        assert isinstance(agent, LearnerAgent)
+
+    def test_create_orchestrator(self):
+        agent = AgentFactory.create_agent("orchestrator", "Orch-1")
+        assert isinstance(agent, OrchestratorAgent)
+
+    def test_unknown_type_returns_none(self):
+        agent = AgentFactory.create_agent("unknown", "X")
+        assert agent is None
+
+    def test_case_insensitive(self):
+        agent = AgentFactory.create_agent("EXECUTOR", "E")
+        assert isinstance(agent, ExecutorAgent)
+
+    def test_create_team(self):
+        config = {"executor": 2, "analyzer": 1}
+        system = AgentFactory.create_team(config)
+        # orchestrator + 2 executors + 1 analyzer = 4
+        assert system.system_metrics["total_agents"] == 4
+        roles = [a.role for a in system.agents.values()]
+        executor_count = sum(1 for r in roles if r == AgentRole.EXECUTOR)
+        analyzer_count = sum(1 for r in roles if r == AgentRole.ANALYZER)
+        assert executor_count == 2
+        assert analyzer_count == 1
