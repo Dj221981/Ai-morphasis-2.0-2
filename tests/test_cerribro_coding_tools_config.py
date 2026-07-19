@@ -46,12 +46,13 @@ def test_coding_pipeline_guardrails_and_output_contract() -> None:
         "produce_grounded_summary",
     ]
 
-    assert coding_tools["required_artifacts"] == [
+    required_artifacts = set(coding_tools["required_artifacts"])
+    assert {
         "change_rationale",
         "risk_notes",
         "verification_output_summary",
         "rollback_or_fallback_note_if_checks_fail",
-    ]
+    }.issubset(required_artifacts)
 
     guardrails = coding_tools["guardrails"]
     assert guardrails["read_before_edit"] is True

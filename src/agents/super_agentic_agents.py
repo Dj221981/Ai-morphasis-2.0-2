@@ -381,6 +381,7 @@ class BaseAgent(ABC):
                     if not task.transition_to(TaskStatus.FAILED) and task.status != TaskStatus.FAILED:
                         # Last-resort fallback: guarded transition unavailable from current state
                         self._force_task_status(task, TaskStatus.FAILED)
+                    should_retry = task.status == TaskStatus.RETRYING
 
                 self.task_history.append(task)
                 self._update_metrics(task, success=False, started_at=start_time)
