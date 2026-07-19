@@ -137,7 +137,7 @@ class AgentTrainer:
         self.batch_size: int = config.get("batch_size", 32)
         self.update_freq: int = config.get("update_freq", 4)
         self.target_update_freq: int = config.get("target_update_freq", 1000)
-        self.checkpoint_dir = Path(config.get("checkpoint_dir", "checkpoints"))
+        self.checkpoint_dir = Path(config.get("checkpoint_dir", "/models/checkpoints"))
 
         self.episode_rewards = []
         self.total_steps = 0
