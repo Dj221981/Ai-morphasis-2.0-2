@@ -376,12 +376,10 @@ class BaseAgent(ABC):
                         if not task.transition_to(TaskStatus.RETRYING):
                             # Last-resort fallback: guarded transition unavailable from current state
                             self._force_task_status(task, TaskStatus.RETRYING)
-                    should_retry = task.status == TaskStatus.RETRYING
                 else:
                     if not task.transition_to(TaskStatus.FAILED) and task.status != TaskStatus.FAILED:
                         # Last-resort fallback: guarded transition unavailable from current state
                         self._force_task_status(task, TaskStatus.FAILED)
-                    should_retry = task.status == TaskStatus.RETRYING
 
                 self.task_history.append(task)
                 self._update_metrics(task, success=False, started_at=start_time)
@@ -389,7 +387,7 @@ class BaseAgent(ABC):
                 self.last_activity = datetime.now()
 
             logger.error(f"Task {task.id} failed: {str(e)}")
-            if should_retry:
+            if task.status == TaskStatus.RETRYING:
                 logger.info(
                     f"Task {task.id} marked for retry ({task.retry_count}/{task.max_retries})"
                 )
