@@ -46,6 +46,13 @@ def test_coding_pipeline_guardrails_and_output_contract() -> None:
         "produce_grounded_summary",
     ]
 
+    assert coding_tools["required_artifacts"] == [
+        "change_rationale",
+        "risk_notes",
+        "verification_output_summary",
+        "rollback_or_fallback_note_if_checks_fail",
+    ]
+
     guardrails = coding_tools["guardrails"]
     assert guardrails["read_before_edit"] is True
     assert guardrails["minimal_diff_preferred"] is True
