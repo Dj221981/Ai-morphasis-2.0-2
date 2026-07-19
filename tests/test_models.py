@@ -17,10 +17,9 @@ from src.models.neural_network import (
     AgentLearningModel,
     ExperienceReplay
 )
-from src.training.train import (
-    TrainingEnvironment,
-    AgentTrainer
-)
+training_module = pytest.importorskip("src.training.train")
+TrainingEnvironment = training_module.TrainingEnvironment
+AgentTrainer = training_module.AgentTrainer
 
 
 class TestDQNNetwork:

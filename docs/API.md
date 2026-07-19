@@ -102,6 +102,20 @@ print(f"Running {config.app_name} v{config.version}")
 print(f"Using device: {config.model_device}")
 ```
 
+### `agents/cerribro/agent_config.json`
+
+Cerribro has a mode-aware coding tools profile configuration:
+
+- Base profile + optional deep-upgrade toggles
+- Coding tool activation rules (`coding_assistant`, `app_builder`, `game_builder`, `conceptual_only`)
+- Deterministic coding workflow pipeline
+- Guardrails and required verification artifacts
+- Final output contract for coding tasks
+
+See:
+- `../agents/cerribro/README.md`
+- `../agents/cerribro/coding_tools.md`
+
 ## Testing
 
 ### Fixtures

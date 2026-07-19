@@ -1,0 +1,72 @@
+import json
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+CONFIG_PATH = REPO_ROOT / "agents" / "cerribro" / "agent_config.json"
+
+
+def load_cerribro_config() -> dict:
+    try:
+        return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise AssertionError(f"Cerribro config not found at {CONFIG_PATH}") from exc
+    except json.JSONDecodeError as exc:
+        raise AssertionError(f"Cerribro config contains invalid JSON: {exc}") from exc
+
+
+def test_cerribro_coding_tools_profile_exists() -> None:
+    assert CONFIG_PATH.exists()
+    config = load_cerribro_config()
+    assert config["agent_name"] == "cerribro"
+    assert "coding_tools" in config
+    assert isinstance(config["coding_tools"], dict) and config["coding_tools"]
+
+    coding_tools = config["coding_tools"]
+    assert coding_tools["enabled"] is True
+    assert (REPO_ROOT / coding_tools["policy_file"]).exists()
+
+def test_coding_tools_activation_rules_cover_required_modes() -> None:
+    activation_rules = load_cerribro_config()["coding_tools"]["activation_rules"]
+    assert activation_rules["coding_assistant"] == "always"
+    assert activation_rules["app_builder"] == "activate_when_concrete_code_task_present"
+    assert activation_rules["game_builder"] == "activate_when_concrete_code_task_present"
+    assert activation_rules["conceptual_only"] == "no_tool_execution_unless_requested_for_validation"
+
+
+def test_coding_pipeline_guardrails_and_output_contract() -> None:
+    coding_tools = load_cerribro_config()["coding_tools"]
+
+    assert coding_tools["workflow_pipeline"] == [
+        "inspect_context",
+        "plan_minimal_changeset",
+        "apply_edits",
+        "run_quality_gates",
+        "verify_acceptance_criteria",
+        "produce_grounded_summary",
+    ]
+
+    required_artifacts = set(coding_tools["required_artifacts"])
+    assert {
+        "change_rationale",
+        "risk_notes",
+        "verification_output_summary",
+        "rollback_or_fallback_note_if_checks_fail",
+    }.issubset(required_artifacts)
+
+    guardrails = coding_tools["guardrails"]
+    assert guardrails["read_before_edit"] is True
+    assert guardrails["minimal_diff_preferred"] is True
+    assert guardrails["deny_large_refactor_without_request"] is True
+    assert guardrails["require_verification_evidence_for_code_claims"] is True
+    assert guardrails["mark_unverified_assumptions"] is True
+    assert guardrails["deny_unsafe_or_malicious_requests"] is True
+
+    assert coding_tools["output_contract"] == [
+        "objective",
+        "files_changed",
+        "diff_summary",
+        "tests_checks_run_with_status",
+        "known_limitations_or_unknowns",
+        "next_recommended_step",
+    ]

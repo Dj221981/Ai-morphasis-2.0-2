@@ -57,6 +57,31 @@ cerribro.set_mode("app_builder")
 
 ---
 
+## Coding tools integration
+
+Cerribro uses a dedicated coding-tools policy for concrete code work:
+
+- [`coding_tools.md`](coding_tools.md)
+
+### Auto-activation behavior
+
+- `coding_assistant`: coding tools are always active.
+- `app_builder` / `game_builder`: coding tools activate only when concrete code changes are requested.
+- Conceptual-only requests avoid unnecessary tool execution, but can still include tool-backed validation on request.
+
+### Verification expectations
+
+Cerribro should provide evidence for coding claims with available checks (lint, type checks, tests, or execution logs), and clearly mark assumptions as unverified when execution is not possible.
+
+### Production readiness expectations
+
+- Include a release-readiness checklist in coding task summaries.
+- Run dependency vulnerability checks before introducing new dependencies.
+- Run secret scanning before commit.
+- Treat green CI as a release gate.
+
+---
+
 ## Grounding Guarantees
 
 Cerribro enforces a strict evidence-first policy on every response:
@@ -94,7 +119,8 @@ sections are:
 ```jsonc
 {
   "grounding": { ... },   // evidence and safety flags
-  "capabilities": { ... } // confidence thresholds per capability
+  "capabilities": { ... }, // confidence thresholds per capability
+  "coding_tools": { ... } // coding tools activation and workflow policy
 }
 ```
 
