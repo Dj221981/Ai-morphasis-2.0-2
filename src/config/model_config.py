@@ -41,9 +41,9 @@ dqn_config = {
     },
     "data": {
         "normalization_type": "minmax",
-        "reward_normalization": true,
+        "reward_normalization": True,
         "augmentation": {
-            "enabled": true,
+            "enabled": True,
             "noise_std": 0.05,
             "mixup_alpha": 0.2
         }
@@ -51,8 +51,8 @@ dqn_config = {
     "evaluation": {
         "eval_frequency": 10,
         "eval_episodes": 10,
-        "save_best_model": true,
-        "save_all_checkpoints": false
+        "save_best_model": True,
+        "save_all_checkpoints": False
     }
 }
 
@@ -92,9 +92,9 @@ policy_config = {
     },
     "data": {
         "normalization_type": "zscore",
-        "reward_normalization": true,
+        "reward_normalization": True,
         "augmentation": {
-            "enabled": true,
+            "enabled": True,
             "noise_std": 0.05,
             "mixup_alpha": 0.15
         }
@@ -102,8 +102,8 @@ policy_config = {
     "evaluation": {
         "eval_frequency": 10,
         "eval_episodes": 10,
-        "save_best_model": true,
-        "save_all_checkpoints": false
+        "save_best_model": True,
+        "save_all_checkpoints": False
     }
 }
 
@@ -143,9 +143,9 @@ small_config = {
     },
     "data": {
         "normalization_type": "minmax",
-        "reward_normalization": false,
+        "reward_normalization": False,
         "augmentation": {
-            "enabled": false,
+            "enabled": False,
             "noise_std": 0.0,
             "mixup_alpha": 0.0
         }
@@ -153,8 +153,8 @@ small_config = {
     "evaluation": {
         "eval_frequency": 5,
         "eval_episodes": 5,
-        "save_best_model": true,
-        "save_all_checkpoints": false
+        "save_best_model": True,
+        "save_all_checkpoints": False
     }
 }
 
@@ -194,9 +194,9 @@ large_config = {
     },
     "data": {
         "normalization_type": "robust",
-        "reward_normalization": true,
+        "reward_normalization": True,
         "augmentation": {
-            "enabled": true,
+            "enabled": True,
             "noise_std": 0.02,
             "mixup_alpha": 0.3
         }
@@ -204,8 +204,8 @@ large_config = {
     "evaluation": {
         "eval_frequency": 50,
         "eval_episodes": 20,
-        "save_best_model": true,
-        "save_all_checkpoints": false
+        "save_best_model": True,
+        "save_all_checkpoints": False
     }
 }
 
@@ -246,9 +246,9 @@ continuous_config = {
     },
     "data": {
         "normalization_type": "zscore",
-        "reward_normalization": true,
+        "reward_normalization": True,
         "augmentation": {
-            "enabled": true,
+            "enabled": True,
             "noise_std": 0.05,
             "mixup_alpha": 0.2
         }
@@ -256,8 +256,8 @@ continuous_config = {
     "evaluation": {
         "eval_frequency": 20,
         "eval_episodes": 10,
-        "save_best_model": true,
-        "save_all_checkpoints": false
+        "save_best_model": True,
+        "save_all_checkpoints": False
     }
 }
 
@@ -298,9 +298,9 @@ multi_agent_config = {
     },
     "data": {
         "normalization_type": "minmax",
-        "reward_normalization": true,
+        "reward_normalization": True,
         "augmentation": {
-            "enabled": true,
+            "enabled": True,
             "noise_std": 0.05,
             "mixup_alpha": 0.2
         }
@@ -308,8 +308,8 @@ multi_agent_config = {
     "evaluation": {
         "eval_frequency": 30,
         "eval_episodes": 15,
-        "save_best_model": true,
-        "save_all_checkpoints": false
+        "save_best_model": True,
+        "save_all_checkpoints": False
     }
 }
 
