@@ -357,9 +357,7 @@ class AgentLearningModel:
             dummy = tf.zeros((1, self.state_size))
             self.network(dummy, training=False)
 
-        weights = self.network.get_weights()
-        with open(filepath, "wb") as f:
-            pickle.dump(weights, f)
+        self.network.save_weights(filepath)
         logger.info(f"Model saved to {filepath}")
 
     def load_model(self, filepath: str) -> None:
