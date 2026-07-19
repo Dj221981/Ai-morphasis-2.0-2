@@ -829,3 +829,49 @@ class TestAgentSystemSubmitEdgeCases:
         t = system.create_task("edge", {})
         result = system.submit_task(t, agent_id="no-such-agent")
         assert result is False
+
+
+# ---------------------------------------------------------------------------
+# Third round of hardening tests (5 more)
+# ---------------------------------------------------------------------------
+
+class TestBaseAgentRepr:
+    def test_repr_contains_name_and_role(self, executor):
+        r = repr(executor)
+        assert executor.name in r
+        assert "executor" in r.lower()
+
+
+class TestAgentSystemRepr:
+    def test_repr_contains_system_name_and_agent_count(self, system):
+        agent = ExecutorAgent("e-repr")
+        system.add_agent(agent)
+        r = repr(system)
+        assert system.name in r
+        # orchestrator + 1 added agent = 2
+        assert "2" in r
+
+
+class TestTaskDictRetryAt:
+    def test_to_dict_includes_last_retry_at_after_retry(self):
+        t = Task(description="retry-dict", max_retries=2)
+        t.transition_to(TaskStatus.ASSIGNED)
+        t.transition_to(TaskStatus.RUNNING)
+        t.transition_to(TaskStatus.RETRYING)
+        d = t.to_dict()
+        assert d["last_retry_at"] is not None
+        assert d["status"] == "retrying"
+
+
+class TestAgentMemoryStrictRetrieval:
+    def test_episodic_type_misses_semantic_only_key(self):
+        """retrieve(key, 'episodic') must return None if the key only lives in semantic memory."""
+        mem = AgentMemory(agent_id="a1")
+        mem.store_semantic("fact", "only-in-semantic")
+        assert mem.retrieve("fact", "episodic") is None
+
+    def test_semantic_type_misses_episodic_only_key(self):
+        """retrieve(key, 'semantic') must return None if the key only lives in episodic memory."""
+        mem = AgentMemory(agent_id="a1")
+        mem.store_episode("ep", "only-in-episodic")
+        assert mem.retrieve("ep", "semantic") is None
