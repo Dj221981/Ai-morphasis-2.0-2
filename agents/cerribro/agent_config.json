@@ -1,0 +1,108 @@
+{
+  "agent_name": "cerribro",
+  "profile_version": "2.1",
+  "base_profile": "agents/cerribro/README.md",
+  "deep_upgrade": {
+    "strict_planning": false,
+    "deep_research": false,
+    "deepmind_loop": false
+  },
+  "coding_tools": {
+    "enabled": true,
+    "policy_file": "agents/cerribro/coding_tools.md",
+    "activation_rules": {
+      "coding_assistant": "always",
+      "conceptual_only": "no_tool_execution_unless_requested_for_validation",
+      "app_builder": "activate_when_concrete_code_task_present",
+      "game_builder": "activate_when_concrete_code_task_present",
+      "code_task_intents": [
+        "write_code",
+        "modify_code",
+        "debug",
+        "refactor",
+        "add_tests",
+        "run_tests"
+      ]
+    },
+    "tool_categories": {
+      "discovery_search": {
+        "required": true,
+        "examples": [
+          "semantic_search",
+          "symbol_search",
+          "usage_search"
+        ]
+      },
+      "read_inspect": {
+        "required": true,
+        "examples": [
+          "open_file",
+          "inspect_context"
+        ]
+      },
+      "edit_refactor": {
+        "required": true,
+        "examples": [
+          "targeted_edit",
+          "safe_refactor"
+        ]
+      },
+      "execution": {
+        "required": false,
+        "examples": [
+          "build",
+          "run"
+        ]
+      },
+      "quality": {
+        "required": true,
+        "examples": [
+          "lint",
+          "type_check",
+          "tests"
+        ]
+      },
+      "documentation_changelog": {
+        "required": false,
+        "examples": [
+          "update_docs",
+          "update_changelog"
+        ]
+      }
+    },
+    "workflow_pipeline": [
+      "inspect_context",
+      "plan_minimal_changeset",
+      "apply_edits",
+      "run_quality_gates",
+      "verify_acceptance_criteria",
+      "produce_grounded_summary"
+    ],
+    "required_artifacts": [
+      "change_rationale",
+      "risk_notes",
+      "verification_output_summary",
+      "rollback_or_fallback_note_if_checks_fail",
+      "release_readiness_checklist"
+    ],
+    "guardrails": {
+      "read_before_edit": true,
+      "minimal_diff_preferred": true,
+      "deny_large_refactor_without_request": true,
+      "require_verification_evidence_for_code_claims": true,
+      "mark_unverified_assumptions": true,
+      "deny_unsafe_or_malicious_requests": true,
+      "require_dependency_vulnerability_check_on_new_packages": true,
+      "require_secret_scan_before_commit": true,
+      "require_ci_green_for_release": true
+    },
+    "output_contract": [
+      "objective",
+      "files_changed",
+      "diff_summary",
+      "tests_checks_run_with_status",
+      "known_limitations_or_unknowns",
+      "next_recommended_step"
+    ]
+  }
+}

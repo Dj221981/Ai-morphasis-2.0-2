@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ai-morphasis-config
+  namespace: ai-morphasis
+data:
+  APP_ENV: "production"
+  LOG_LEVEL: "INFO"
+  MODEL_PATH: "/models/latest"
+  TF_SERVING_URL: "http://tensorflow-serving:8501"

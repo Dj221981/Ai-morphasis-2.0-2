@@ -1,0 +1,13 @@
+replicaCount: 1
+env:
+  APP_ENV: development
+  LOG_LEVEL: DEBUG
+hpa:
+  enabled: false
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

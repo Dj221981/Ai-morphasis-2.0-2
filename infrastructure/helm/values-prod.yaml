@@ -1,0 +1,16 @@
+replicaCount: 3
+ingress:
+  enabled: true
+  className: nginx
+  host: ai-morphasis.example.com
+hpa:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 2Gi

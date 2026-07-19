@@ -2,48 +2,66 @@
 
 ## Overview
 
-This document describes the software in this repository. It can be used as a quick reference for understanding the project, how it works, and how to get started.
+This document describes the software in this repository and provides a quick reference for setup, execution, and contribution.
 
 ## Purpose
 
-The goal of the software is to provide a clear, maintainable foundation for the Ai-morphasis 2.0-2 project.
+The goal of the software is to provide a clear, maintainable foundation for the Ai-morphasis 2.0-2 project, including API delivery and agent/model experimentation.
 
 ## Features
 
-- Project documentation
-- Clear setup guidance
-- Usage notes
-- Extensible structure for future updates
+- FastAPI service with health and readiness endpoints
+- Core modules for data preprocessing, model configuration, neural network logic, and agent orchestration
+- Comprehensive pytest coverage across API, agents, tasking, memory, and model behavior
+- GitHub Actions workflows for CI and quality checks
 
 ## Getting Started
 
 ### Prerequisites
 
-Add any required tools, runtimes, or dependencies here.
+- Python 3.9 or newer
+- pip
 
 ### Installation
 
 ```bash
-# Add installation steps here
+pip install -r requirements.txt
 ```
 
 ### Running the Software
 
 ```bash
-# Add run commands here
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ## Usage
 
-Explain the main ways to use the software here. Include examples if possible.
+Typical usage flows:
+
+1. Start the API service and verify health:
+   - `GET /health`
+   - `GET /ready`
+2. Run tests during development:
+   - `pytest tests -v`
+3. Run critical lint checks:
+   - `python -m flake8 src tests --count --select=E9,F63,F7,F82 --show-source --statistics`
 
 ## Configuration
 
-Document any configuration files, environment variables, or settings required by the project.
+Key environment variables:
+
+- `APP_ALLOWED_HOSTS` (comma-separated list, defaults to `*`)
+- `x-request-id` request header (optional, generated if absent)
 
 ## Project Structure
 
-Describe the most important files and directories in the repository.
+- `app/main.py` - FastAPI application and middleware
+- `src/agents/super_agentic_agents.py` - agent orchestration and execution
+- `src/models/neural_network.py` - model implementation logic
+- `src/data/preprocessing.py` - data preparation utilities
+- `src/config/model_config.py` - model/runtime configuration
+- `tests/` - automated tests
+- `docs/` - API, architecture, and contribution docs
 
 ## Contributing
 
@@ -54,4 +72,4 @@ Describe the most important files and directories in the repository.
 
 ## License
 
-Add license information here.
+MIT License (see `LICENSE`).
