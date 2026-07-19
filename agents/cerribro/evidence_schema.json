@@ -4,8 +4,26 @@
   "title": "CerribroEvidenceBundle",
   "description": "Schema for the evidence bundle produced by Cerribro's Deep Research layer.",
   "type": "object",
-  "required": ["evidence_bundle"],
+  "anyOf": [
+    { "required": ["evidence_bundle"] },
+    {
+      "required": [
+        "research_questions",
+        "evidence_records",
+        "contradictions",
+        "evidence_map",
+        "freshness_warnings",
+        "synthesis_confidence"
+      ]
+    }
+  ],
   "properties": {
+    "research_questions": { "$ref": "#/properties/evidence_bundle/properties/research_questions" },
+    "evidence_records": { "$ref": "#/properties/evidence_bundle/properties/evidence_records" },
+    "contradictions": { "$ref": "#/properties/evidence_bundle/properties/contradictions" },
+    "evidence_map": { "$ref": "#/properties/evidence_bundle/properties/evidence_map" },
+    "freshness_warnings": { "$ref": "#/properties/evidence_bundle/properties/freshness_warnings" },
+    "synthesis_confidence": { "$ref": "#/properties/evidence_bundle/properties/synthesis_confidence" },
     "evidence_bundle": {
       "type": "object",
       "required": [

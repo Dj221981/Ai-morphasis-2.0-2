@@ -1125,10 +1125,10 @@ class CerribroAgent(BaseAgent):
         layer : str
             One of ``"strict_planning"``, ``"deep_research"``, or ``"deepmind_loop"``.
         """
-        if layer not in self.deep_mode_config:
+        allowed_layers = {"strict_planning", "deep_research", "deepmind_loop"}
+        if layer not in allowed_layers:
             raise ValueError(
-                f"Unknown deep mode layer '{layer}'. "
-                f"Must be one of: {sorted(self.deep_mode_config.keys())}"
+                f"Unknown deep mode layer '{layer}'. Must be one of: {sorted(allowed_layers)}"
             )
         self.deep_mode_config[layer]["enabled"] = True
         logger.info(f"CerribroAgent '{self.name}': deep mode '{layer}' enabled.")
@@ -1142,10 +1142,10 @@ class CerribroAgent(BaseAgent):
         layer : str
             One of ``"strict_planning"``, ``"deep_research"``, or ``"deepmind_loop"``.
         """
-        if layer not in self.deep_mode_config:
+        allowed_layers = {"strict_planning", "deep_research", "deepmind_loop"}
+        if layer not in allowed_layers:
             raise ValueError(
-                f"Unknown deep mode layer '{layer}'. "
-                f"Must be one of: {sorted(self.deep_mode_config.keys())}"
+                f"Unknown deep mode layer '{layer}'. Must be one of: {sorted(allowed_layers)}"
             )
         self.deep_mode_config[layer]["enabled"] = False
         logger.info(f"CerribroAgent '{self.name}': deep mode '{layer}' disabled.")
@@ -1164,7 +1164,7 @@ class CerribroAgent(BaseAgent):
             "malware", "exploit", "ransomware", "backdoor", "keylogger",
             "rootkit", "phishing", "shellcode",
         }
-        payload = json.dumps(params).lower()
+        payload = json.dumps(params, default=str).lower()
         return any(kw in payload for kw in unsafe_keywords)
 
     def _is_ambiguous(self, params: Dict[str, Any]) -> bool:
@@ -1275,7 +1275,8 @@ class CerribroAgent(BaseAgent):
             "contradictions": [],
             "evidence_map": {},
             "freshness_warnings": [],
-            "synthesis_confidence": None,
+            "synthesis_confidence": 0.0,
+            "synthesis_confidence_band": "Uncertain",
             "insufficient_evidence": True,
             "unverified_claims": [],
             "_note": (

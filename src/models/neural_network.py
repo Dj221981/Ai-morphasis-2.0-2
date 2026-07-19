@@ -374,8 +374,7 @@ class AgentLearningModel:
         weights_path = self._get_weights_path(filepath)
         weights_path.parent.mkdir(parents=True, exist_ok=True)
         self.network.save_weights(weights_path)
-        Path(filepath).touch()
-        logger.info(f"Model saved to {filepath}")
+        logger.info(f"Model weights saved to {weights_path}")
 
     def load_model(self, filepath: str) -> None:
         """
