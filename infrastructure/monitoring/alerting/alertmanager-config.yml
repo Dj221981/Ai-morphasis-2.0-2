@@ -1,0 +1,7 @@
+route:
+  receiver: default
+receivers:
+  - name: default
+    # Set ALERTMANAGER_WEBHOOK_URL in deployment templating before production use.
+    webhook_configs:
+      - url: ${ALERTMANAGER_WEBHOOK_URL}

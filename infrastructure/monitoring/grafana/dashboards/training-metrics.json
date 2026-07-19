@@ -1,0 +1,9 @@
+{
+  "title": "Training Metrics",
+  "schemaVersion": 39,
+  "version": 1,
+  "panels": [
+    {"type": "timeseries", "title": "Training Job Duration"},
+    {"type": "timeseries", "title": "Validation Score"}
+  ]
+}

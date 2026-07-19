@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-morphasis
+  namespace: ai-morphasis
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ai-morphasis
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: ai-morphasis
+    spec:
+      initContainers:
+        - name: validate-secrets
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - test "$DATABASE_URL" != "__SET_AT_DEPLOY_TIME__" && test "$API_KEY" != "__SET_AT_DEPLOY_TIME__"
+          envFrom:
+            - secretRef:
+                name: ai-morphasis-secrets
+      containers:
+        - name: ai-morphasis
+          image: ghcr.io/dj221981/ai-morphasis:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: ai-morphasis-config
+            - secretRef:
+                name: ai-morphasis-secrets
+          volumeMounts:
+            - name: models
+              mountPath: /models
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: ai-morphasis-models-pvc
