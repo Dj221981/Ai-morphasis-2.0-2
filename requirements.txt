@@ -1,5 +1,9 @@
 fastapi==0.116.1
 uvicorn[standard]==0.35.0
 python-dotenv==1.1.1
-pytest==8.4.1
 httpx==0.28.1
+numpy>=1.24
+pydantic>=2.7
+loguru>=0.7
+tensorflow>=2.15
+pytest>=8.4.1

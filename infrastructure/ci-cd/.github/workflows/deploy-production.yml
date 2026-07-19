@@ -1,0 +1,17 @@
+name: Deploy Production
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure kubeconfig
+        run: echo "${{ secrets.KUBE_CONFIG_PROD }}" > kubeconfig
+      - name: Deploy
+        env:
+          KUBECONFIG: ${{ github.workspace }}/kubeconfig
+        run: |
+          kubectl apply -k infrastructure/kubernetes
+          kubectl -n ai-morphasis rollout status deployment/ai-morphasis --timeout=240s

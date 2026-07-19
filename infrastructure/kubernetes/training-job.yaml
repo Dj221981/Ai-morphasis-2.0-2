@@ -1,0 +1,49 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ai-morphasis-training
+  namespace: ai-morphasis
+spec:
+  schedule: "0 */6 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: OnFailure
+          initContainers:
+            - name: validate-secrets
+              image: busybox:1.36
+              command:
+                - sh
+                - -c
+                - test "$DATABASE_URL" != "__SET_AT_DEPLOY_TIME__" && test "$API_KEY" != "__SET_AT_DEPLOY_TIME__"
+              envFrom:
+                - secretRef:
+                    name: ai-morphasis-secrets
+          containers:
+            - name: trainer
+              image: ghcr.io/dj221981/ai-morphasis:latest
+              command: ["python", "src/training/train.py"]
+              envFrom:
+                - configMapRef:
+                    name: ai-morphasis-config
+                - secretRef:
+                    name: ai-morphasis-secrets
+              volumeMounts:
+                - name: models
+                  mountPath: /models
+              resources:
+                requests:
+                  cpu: 500m
+                  memory: 1Gi
+                limits:
+                  cpu: "2"
+                  memory: 4Gi
+          volumes:
+            - name: models
+              persistentVolumeClaim:
+                claimName: ai-morphasis-models-pvc
