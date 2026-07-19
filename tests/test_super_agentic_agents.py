@@ -21,8 +21,9 @@ Covers:
 - AgentCapability validation (__post_init__)
 """
 
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 from src.agents.super_agentic_agents import (
     AgentCapability,
