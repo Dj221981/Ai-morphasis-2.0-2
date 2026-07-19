@@ -51,5 +51,4 @@ def health() -> dict[str, str]:
 
 @app.get("/ready")
 def ready() -> dict[str, str]:
-    _ = STARTED_AT
     return {"status": "ok"}
