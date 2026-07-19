@@ -370,16 +370,17 @@ class BaseAgent(ABC):
 
                 if task.retry_count < task.max_retries:
                     task.retry_count += 1
+                    # The task may already be in RETRYING state from a prior retry
+                    # iteration; skip the transition in that case.
                     if task.status != TaskStatus.RETRYING:
                         if not task.transition_to(TaskStatus.RETRYING):
                             # Last-resort fallback: guarded transition unavailable from current state
                             self._force_task_status(task, TaskStatus.RETRYING)
                     should_retry = task.status == TaskStatus.RETRYING
                 else:
-                    if not task.transition_to(TaskStatus.FAILED):
+                    if not task.transition_to(TaskStatus.FAILED) and task.status != TaskStatus.FAILED:
                         # Last-resort fallback: guarded transition unavailable from current state
-                        if task.status != TaskStatus.FAILED:
-                            self._force_task_status(task, TaskStatus.FAILED)
+                        self._force_task_status(task, TaskStatus.FAILED)
 
                 self.task_history.append(task)
                 self._update_metrics(task, success=False, started_at=start_time)
