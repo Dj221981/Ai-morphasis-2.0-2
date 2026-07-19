@@ -94,6 +94,14 @@ class AgentCapability:
     requires_resources: List[str] = field(default_factory=list)
     version: str = "1.0.0"
 
+    def __post_init__(self) -> None:
+        if not self.name or not self.name.strip():
+            raise ValueError("AgentCapability name must not be empty")
+        if not (0.0 <= self.confidence_score <= 1.0):
+            raise ValueError(
+                f"AgentCapability confidence_score must be in [0.0, 1.0]; got {self.confidence_score}"
+            )
+
     def __repr__(self) -> str:
         return f"<Capability: {self.name} v{self.version} ({self.confidence_score:.2%})>"
 
@@ -362,20 +370,16 @@ class BaseAgent(ABC):
 
                 if task.retry_count < task.max_retries:
                     task.retry_count += 1
-                    if task.status == TaskStatus.RUNNING:
-                        if task.transition_to(TaskStatus.RETRYING):
-                            should_retry = True
-                    elif task.status != TaskStatus.RETRYING:
-                        # Fallback in case status is unexpected due to upstream mutation
-                        task.status = TaskStatus.RETRYING
-                        task.last_retry_at = datetime.now()
-                        should_retry = True
+                    if task.status != TaskStatus.RETRYING:
+                        if not task.transition_to(TaskStatus.RETRYING):
+                            # Last-resort fallback: guarded transition unavailable from current state
+                            self._force_task_status(task, TaskStatus.RETRYING)
+                    should_retry = True
                 else:
-                    if task.status == TaskStatus.RUNNING:
-                        task.transition_to(TaskStatus.FAILED)
-                    elif task.status != TaskStatus.FAILED:
-                        task.status = TaskStatus.FAILED
-                        task.completed_at = datetime.now()
+                    if not task.transition_to(TaskStatus.FAILED):
+                        # Last-resort fallback: guarded transition unavailable from current state
+                        if task.status != TaskStatus.FAILED:
+                            self._force_task_status(task, TaskStatus.FAILED)
 
                 self.task_history.append(task)
                 self._update_metrics(task, success=False, started_at=start_time)
@@ -396,6 +400,28 @@ class BaseAgent(ABC):
                     # Avoid permanent ERROR lock-in for recoverable failures
                     self.status = AgentStatus.IDLE
                 self.last_activity = datetime.now()
+
+    def _force_task_status(self, task: Task, new_status: TaskStatus) -> None:
+        """
+        Force-set task status as a last-resort fallback when a guarded
+        ``transition_to()`` call returns False and the task must still reach
+        a terminal or retry state.
+
+        This method must only be called after ``transition_to()`` has already
+        been attempted and failed.  It logs a warning so the bypass is always
+        visible in logs and avoids silently hiding model inconsistencies.
+        """
+        logger.warning(
+            "Task %s: forced status %s -> %s "
+            "(guarded transition unavailable from current state)",
+            task.id, task.status.value, new_status.value,
+        )
+        task.status = new_status
+        now = datetime.now()
+        if new_status == TaskStatus.RETRYING:
+            task.last_retry_at = now
+        elif new_status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
+            task.completed_at = now
 
     def _update_metrics(self, task: Task, success: bool, started_at: Optional[datetime] = None) -> None:
         """Update performance metrics with rolling average duration."""
@@ -653,14 +679,44 @@ class AgentSystem:
         return True
 
     def remove_agent(self, agent_id: str) -> bool:
-        """Remove an agent from the system."""
+        """Remove an agent from the system and clean up all references.
+
+        Cleans up:
+        - ``orchestrator.managed_agents``
+        - ``parent_agent`` back-reference on the removed agent
+        - peer-agent cross-references (both directions)
+        - ``parent_agent`` references on child agents that pointed to the
+          removed agent
+        """
         with self._lock:
-            if agent_id in self.agents:
-                agent = self.agents.pop(agent_id)
-                self.system_metrics["total_agents"] -= 1
-                logger.info(f"Agent {agent.name} removed from system")
-                return True
-        return False
+            if agent_id not in self.agents:
+                return False
+
+            agent = self.agents.pop(agent_id)
+            self.system_metrics["total_agents"] -= 1
+
+            # Remove from orchestrator managed registry
+            self.orchestrator.managed_agents.pop(agent_id, None)
+
+            # Clear the agent's own parent back-reference
+            agent.parent_agent = None
+
+            # Remove this agent from its peers' peer sets (both directions)
+            for peer_id in list(agent.peer_agents):
+                peer = self.agents.get(peer_id)
+                if peer is not None:
+                    peer.peer_agents.discard(agent_id)
+            agent.peer_agents.clear()
+
+            # Clear parent reference on child agents that pointed here
+            for child_id in list(agent.child_agents):
+                child = self.agents.get(child_id)
+                if child is not None and child.parent_agent == agent_id:
+                    child.parent_agent = None
+            agent.child_agents.clear()
+
+            logger.info(f"Agent {agent.name} removed from system")
+            return True
 
     def get_agent(self, agent_id: str) -> Optional[BaseAgent]:
         """Retrieve an agent by ID."""
@@ -675,6 +731,8 @@ class AgentSystem:
         max_retries: int = 3,
     ) -> Task:
         """Create a new task."""
+        if not description or not description.strip():
+            raise ValueError("Task description must not be empty")
         task = Task(
             description=description,
             parameters=parameters,
@@ -728,8 +786,9 @@ class AgentSystem:
         except Exception:
             with self._lock:
                 if task.status == TaskStatus.RETRYING:
-                    # Requeue for retry dispatch
-                    self.global_task_queue.append(task)
+                    # Requeue for retry dispatch, guarding against duplicates
+                    if not any(t.id == task.id for t in self.global_task_queue):
+                        self.global_task_queue.append(task)
                 elif task.status == TaskStatus.FAILED:
                     self.system_metrics["failed_tasks"] += 1
                 self._update_system_task_duration(task, start_time)
