@@ -638,3 +638,86 @@ class TestAgentFactory:
         analyzer_count = sum(1 for r in roles if r == AgentRole.ANALYZER)
         assert executor_count == 2
         assert analyzer_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Additional tests (10 more)
+# ---------------------------------------------------------------------------
+
+class TestBaseAgentCapabilityHelpers:
+    def test_get_capability_returns_registered(self, executor):
+        cap = AgentCapability(name="search", description="search things")
+        executor.register_capability(cap)
+        retrieved = executor.get_capability("search")
+        assert retrieved is cap
+
+    def test_get_capability_returns_none_for_missing(self, executor):
+        assert executor.get_capability("nonexistent") is None
+
+    def test_list_capabilities_reflects_registered(self, executor):
+        executor.register_capability(AgentCapability(name="alpha", description="a"))
+        executor.register_capability(AgentCapability(name="beta", description="b"))
+        names = executor.list_capabilities()
+        assert "alpha" in names
+        assert "beta" in names
+        assert len(names) == 2
+
+
+class TestAnalyzerAgentBehaviour:
+    def test_think_returns_expected_keys(self):
+        agent = AnalyzerAgent("an-1")
+        result = agent.think({"data": 42})
+        assert "data_received" in result
+        assert "insights_generated" in result
+        assert result["insights_generated"] is True
+
+    def test_think_false_when_no_data(self):
+        agent = AnalyzerAgent("an-2")
+        result = agent.think(None)
+        assert result["data_received"] is False
+
+
+class TestLearnerAgentBehaviour:
+    def test_learn_from_experience_stores_pattern(self):
+        agent = LearnerAgent("learner-1")
+        agent.learn_from_experience({"event": "success", "reward": 1.0})
+        assert len(agent.learned_patterns) == 1
+
+    def test_learn_from_experience_multiple_accumulates(self):
+        agent = LearnerAgent("learner-2")
+        for i in range(3):
+            agent.learn_from_experience({"step": i})
+        assert len(agent.learned_patterns) == 3
+
+
+class TestAgentSystemHelpers:
+    def test_get_agent_returns_correct_agent(self, system):
+        agent = ExecutorAgent("e-find")
+        system.add_agent(agent)
+        found = system.get_agent(agent.id)
+        assert found is agent
+
+    def test_get_agent_returns_none_for_unknown(self, system):
+        assert system.get_agent("does-not-exist") is None
+
+    def test_to_json_is_valid_json(self, system):
+        import json as _json
+        agent = ExecutorAgent("e-json")
+        system.add_agent(agent)
+        serialized = system.to_json()
+        data = _json.loads(serialized)
+        assert "agents" in data
+        assert "metrics" in data
+
+    def test_create_task_with_high_priority(self, system):
+        t = system.create_task("urgent work", {}, priority=TaskPriority.HIGH)
+        assert t.priority == TaskPriority.HIGH
+        assert system.task_registry[t.id] is t
+
+    def test_submit_task_without_agent_id_auto_distributes(self, system):
+        agent = ExecutorAgent("e-auto")
+        system.add_agent(agent)
+        t = system.create_task("auto-distribute", {})
+        result = system.submit_task(t)
+        assert result is True
+        assert t.id in agent.active_tasks
