@@ -1216,7 +1216,8 @@ class CerribroAgent(BaseAgent):
             "contradictions": [],
             "evidence_map": {},
             "freshness_warnings": [],
-            "synthesis_confidence": None,
+            "synthesis_confidence": 0.0,
+            "synthesis_confidence_band": "Uncertain",
             "insufficient_evidence": True,
             "unverified_claims": [],
             "_note": (
