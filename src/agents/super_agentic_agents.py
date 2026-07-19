@@ -1066,10 +1066,10 @@ class CerribroAgent(BaseAgent):
         layer : str
             One of ``"strict_planning"``, ``"deep_research"``, or ``"deepmind_loop"``.
         """
-        if layer not in self.deep_mode_config:
+        allowed_layers = {"strict_planning", "deep_research", "deepmind_loop"}
+        if layer not in allowed_layers:
             raise ValueError(
-                f"Unknown deep mode layer '{layer}'. "
-                f"Must be one of: {sorted(self.deep_mode_config.keys())}"
+                f"Unknown deep mode layer '{layer}'. Must be one of: {sorted(allowed_layers)}"
             )
         self.deep_mode_config[layer]["enabled"] = True
         logger.info(f"CerribroAgent '{self.name}': deep mode '{layer}' enabled.")
@@ -1083,10 +1083,10 @@ class CerribroAgent(BaseAgent):
         layer : str
             One of ``"strict_planning"``, ``"deep_research"``, or ``"deepmind_loop"``.
         """
-        if layer not in self.deep_mode_config:
+        allowed_layers = {"strict_planning", "deep_research", "deepmind_loop"}
+        if layer not in allowed_layers:
             raise ValueError(
-                f"Unknown deep mode layer '{layer}'. "
-                f"Must be one of: {sorted(self.deep_mode_config.keys())}"
+                f"Unknown deep mode layer '{layer}'. Must be one of: {sorted(allowed_layers)}"
             )
         self.deep_mode_config[layer]["enabled"] = False
         logger.info(f"CerribroAgent '{self.name}': deep mode '{layer}' disabled.")
