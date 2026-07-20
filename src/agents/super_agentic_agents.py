@@ -18,6 +18,17 @@ For new code, prefer importing from the package directly::
     from src.agents.persistence import InMemoryTaskRepository
     from src.agents.events import InMemoryEventStore, TaskEvent
 
+Deprecation and lifecycle policy:
+- This shim is maintained for backward compatibility and is not intended for
+  feature growth.
+- New code SHOULD import from ``src.agents`` (or submodules) directly.
+- We MAY emit ``DeprecationWarning`` in a future minor release once migration
+  guidance is broadly communicated.
+- We SHOULD only consider removal in a future major release after at least one
+  full minor-release deprecation window.
+- Compatibility-only shims should remain behavior-preserving; changes should be
+  limited to documentation and compatibility maintenance.
+
 Security review / security considerations:
 - This compatibility shim contains no direct input handling, I/O, subprocess,
   network, filesystem, authentication, authorization, or secret-management
