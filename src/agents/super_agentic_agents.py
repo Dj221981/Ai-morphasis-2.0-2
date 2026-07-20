@@ -95,7 +95,7 @@ except ImportError as exc:
         "required sub-module is missing, or there is a circular import.  "
         f"Original error: {exc}"
     ) from exc
-except Exception as exc:  # pragma: no cover — guards against unforeseen errors
+except Exception as exc:  # pragma: no cover -- guards against unforeseen errors
     raise RuntimeError(
         "super_agentic_agents: unexpected error while importing 'src.agents'. "
         f"Original error: {exc}"

@@ -165,7 +165,7 @@ def test_validate_all_modules_raises_on_missing_submodule(monkeypatch):
         SHIM_MODULE.validate_all_modules()
 
 
-def test_validate_shim_integrity_raises_when___all___has_phantom_name():
+def test_validate_shim_integrity_raises_when_all_has_phantom_name():
     """validate_shim_integrity() must raise AssertionError when __all__ contains
     a name that is not actually present on the shim module."""
     original_all = SHIM_MODULE.__all__
