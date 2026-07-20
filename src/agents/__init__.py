@@ -51,10 +51,21 @@ from .specialized import (
 from .system import AgentSystem, AgentFactory, example_usage
 
 # Persistence layer
-from .persistence import TaskRepository, InMemoryTaskRepository
+from .persistence import (
+    TaskRepository,
+    InMemoryTaskRepository,
+    SqlTaskRepository,
+    RedisTaskRepository,
+)
 
 # Event journal
-from .events import TaskEventType, TaskEvent, InMemoryEventStore
+from .events import (
+    TaskEventType,
+    TaskEvent,
+    InMemoryEventStore,
+    SqlEventStore,
+    RedisEventStore,
+)
 
 # Runtime / scheduler
 from .runtime import dispatch_pending_tasks, process_retry_queue, run_once, run_forever
@@ -91,10 +102,14 @@ __all__ = [
     # Persistence
     "TaskRepository",
     "InMemoryTaskRepository",
+    "SqlTaskRepository",
+    "RedisTaskRepository",
     # Events
     "TaskEventType",
     "TaskEvent",
     "InMemoryEventStore",
+    "SqlEventStore",
+    "RedisEventStore",
     # Runtime
     "dispatch_pending_tasks",
     "process_retry_queue",
