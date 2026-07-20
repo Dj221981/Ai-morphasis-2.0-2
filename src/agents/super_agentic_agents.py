@@ -134,14 +134,38 @@ class AgentMemory:
         self.last_accessed = now
         return now
 
+    @staticmethod
+    def _entry_timestamp_for_eviction(
+        key: str,
+        entry: Dict[str, Any],
+        fallback_now: datetime,
+    ) -> datetime:
+        """Resolve a deterministic timestamp used for episodic eviction ordering."""
+        timestamp = entry.get("timestamp")
+        if isinstance(timestamp, datetime):
+            return timestamp
+        fallback = entry.get("last_accessed")
+        if isinstance(fallback, datetime):
+            logger.warning(
+                "Episode %s is missing timestamp; using last_accessed fallback",
+                key,
+            )
+            return fallback
+        logger.warning(
+            "Episode %s is missing timestamp metadata; using current time fallback",
+            key,
+        )
+        return fallback_now
+
     def store_episode(self, key: str, value: Any) -> None:
         """Store an episode in short-term memory."""
         now = self._touch()
         if key not in self.episodic_memory and len(self.episodic_memory) >= self.max_episodes:
+            # Existing-key updates do not increase cardinality, so no eviction is needed.
             # Remove oldest entry by explicit timestamp to make eviction deterministic.
             oldest_key = min(
                 self.episodic_memory.items(),
-                key=lambda item: item[1].get("timestamp", datetime.min),
+                key=lambda item: self._entry_timestamp_for_eviction(item[0], item[1], now),
             )[0]
             del self.episodic_memory[oldest_key]
         self.episodic_memory[key] = {
@@ -382,6 +406,8 @@ class BaseAgent(ABC):
             logger.info(f"Agent {self.name} executing task {task.id}")
             self._emit_telemetry("task_started", task, {"attempt": attempt})
 
+            # Keep checks around each phase boundary to catch cancellation/timeouts
+            # that happen between think/act handoffs in long-running tasks.
             self._raise_if_stopped(task, start_time)
 
             # Think phase
@@ -562,13 +588,14 @@ class BaseAgent(ABC):
                     )
             except TaskCancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "Cancellation check callable failed task_id=%s", task.id
                 )
                 raise RuntimeError(
-                    f"Task {task.id} cancellation check callable failed"
-                )
+                    f"Task {task.id} cancellation check callable failed: "
+                    f"{type(exc).__name__}: {exc}"
+                ) from exc
 
     def _raise_if_stopped(self, task: Task, started_at: datetime) -> None:
         """Run cooperative timeout/cancellation checks at execution boundaries."""
@@ -920,11 +947,12 @@ class AgentSystem:
         max_retries: int = 3,
     ) -> Task:
         """Create a new task."""
-        if not description or not description.strip():
+        if not (isinstance(description, str) and description.strip()):
             raise ValueError("Task description must not be empty")
+        cleaned_description = description.strip()
         if not isinstance(parameters, dict):
             raise TypeError("Task parameters must be a dictionary")
-        description = description.strip()
+        # Defensive copy: isolates task payload from caller-side mutation after creation.
         task_parameters = dict(parameters)
         if not isinstance(priority, TaskPriority):
             raise TypeError("Task priority must be a TaskPriority enum value")
@@ -954,7 +982,7 @@ class AgentSystem:
             raise ValueError("Task required_capabilities must be a list of non-empty strings")
 
         task = Task(
-            description=description,
+            description=cleaned_description,
             parameters=task_parameters,
             priority=priority,
             max_retries=max_retries,
@@ -1048,11 +1076,16 @@ class AgentSystem:
     def _remove_from_global_queue(self, task_id: str) -> None:
         """Remove task from global queue if present."""
         with self._lock:
+            self._assert_lock_held()
             self.global_task_queue = [t for t in self.global_task_queue if t.id != task_id]
             self._queued_task_ids.discard(task_id)
 
     def _queue_task_if_absent(self, task: Task) -> None:
-        """Queue a task once, guarding against duplicate entries."""
+        """Queue a task once, guarding against duplicate entries.
+
+        Callers must hold ``self._lock``.
+        """
+        self._assert_lock_held()
         if task.id in self._queued_task_ids:
             logger.debug("Skipped duplicate queue entry for task_id=%s", task.id)
             return
@@ -1061,13 +1094,29 @@ class AgentSystem:
         logger.info("Task queued task_id=%s status=%s", task.id, task.status.value)
 
     def _add_completed_task(self, task: Task) -> None:
-        """Track a completed task once, guarding against duplicate aggregation."""
+        """Track a completed task once, guarding against duplicate aggregation.
+
+        Callers must hold ``self._lock``.
+        """
+        self._assert_lock_held()
         if task.id in self._completed_task_ids:
             logger.debug("Skipped duplicate completed task aggregation for task_id=%s", task.id)
             return
         self.completed_tasks.append(task)
         self._completed_task_ids.add(task.id)
         logger.info("Task marked completed in system task_id=%s", task.id)
+
+    def _assert_lock_held(self) -> None:
+        """Ensure mutation helpers are called while holding the system lock.
+
+        This is a best-effort check coupled to CPython ``threading.RLock`` via its
+        private ``_is_owned`` API; for other lock implementations the check is skipped.
+        """
+        is_owned = getattr(self._lock, "_is_owned", None)
+        if not callable(is_owned):
+            return
+        if not is_owned():
+            raise RuntimeError("AgentSystem internal mutation requires self._lock")
 
     def _update_system_task_duration(self, task: Task, fallback_start: datetime) -> None:
         """Update system-level rolling average task duration (seconds)."""

@@ -107,6 +107,10 @@ class TestAgentCapabilityValidation:
         with pytest.raises(ValueError, match="version must not be empty"):
             AgentCapability(name="cap", description="desc", version=" ")
 
+    def test_blank_version_raises(self):
+        with pytest.raises(ValueError, match="version must not be empty"):
+            AgentCapability(name="cap", description="desc", version="")
+
 
 # ---------------------------------------------------------------------------
 # Task state transitions
@@ -232,7 +236,6 @@ class TestAgentMemory:
         assert mem.last_accessed >= first_access
         stored_access = mem.semantic_memory["fact"]["last_accessed"]
 
-        time.sleep(0.001)
         mem.retrieve("fact", "semantic")
         assert mem.last_accessed >= stored_access
         assert mem.semantic_memory["fact"]["last_accessed"] >= stored_access
@@ -606,7 +609,10 @@ class TestAgentSystem:
         system.submit_task(t, agent.id)
         system.execute_task(t.id, agent.id)
 
-        with pytest.raises(RuntimeError):
+        with pytest.raises(
+            RuntimeError,
+            match="Refused forced status transition",
+        ):
             system.execute_task(t.id, agent.id)
 
         assert sum(1 for task in system.completed_tasks if task.id == t.id) == 1
