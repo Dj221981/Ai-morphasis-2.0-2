@@ -18,7 +18,7 @@ For new code, prefer importing from the package directly::
     from src.agents.persistence import InMemoryTaskRepository
     from src.agents.events import InMemoryEventStore, TaskEvent
 
-Security review note:
+Security review / security considerations:
 - This compatibility shim contains no direct input handling, I/O, subprocess,
   network, filesystem, authentication, authorization, or secret-management
   logic.
@@ -26,6 +26,12 @@ Security review note:
   ``src.agents``.
 - Keep exports limited to intended public APIs to avoid unintentionally exposing
   internal or privileged functionality.
+- Avoid re-exporting experimental, admin-only, or environment-specific helpers
+  through this compatibility layer.
+- When adding new exports, review whether they enable task execution, code
+  execution, persistence access, or event access that should remain internal.
+- Changes to this shim should stay documentation-oriented unless there is a
+  deliberate compatibility requirement, so behavior is not altered unexpectedly.
 """
 
 # Re-export everything from the package so that all existing imports continue
