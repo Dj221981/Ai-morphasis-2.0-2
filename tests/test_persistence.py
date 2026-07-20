@@ -141,12 +141,14 @@ def test_redis_task_repository_applies_ttl(monkeypatch, fake_redis_client):
     repo = RedisTaskRepository(redis_url="redis://unused", ttl_seconds=300)
     task = _make_task("ttl-task")
     repo.save_task(task)
-    assert repo._client.ttl(repo._task_key(task.id)) == -1
+    key = repo._task_key(task.id)
+    assert repo._client.exists(key) == 1
+    assert repo._client.ttl(key) == -1
 
     task.status = TaskStatus.COMPLETED
     task.completed_at = datetime.now()
     repo.save_task(task)
-    assert repo._client.ttl(repo._task_key(task.id)) > 0
+    assert repo._client.ttl(key) > 0
     repo.close()
 
 

@@ -18,6 +18,17 @@ from .events import InMemoryEventStore, RedisEventStore, SqlEventStore
 from .persistence import InMemoryTaskRepository, RedisTaskRepository, SqlTaskRepository
 
 
+def _get_positive_int_env(name: str):
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return None
+    try:
+        parsed = int(value)
+    except ValueError:
+        return None
+    return parsed if parsed > 0 else None
+
+
 def make_task_repository():
     """Return a task repository based on PERSISTENCE_BACKEND."""
     backend = os.getenv("PERSISTENCE_BACKEND", "sqlite").lower()
@@ -27,11 +38,10 @@ def make_task_repository():
     if backend == "redis":
         url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
         prefix = os.getenv("REDIS_KEY_PREFIX", "agent:task:")
-        ttl = os.getenv("REDIS_TTL_SECONDS")
         return RedisTaskRepository(
             redis_url=url,
             key_prefix=prefix,
-            ttl_seconds=int(ttl) if ttl and int(ttl) > 0 else None,
+            ttl_seconds=_get_positive_int_env("REDIS_TTL_SECONDS"),
         )
     return InMemoryTaskRepository()
 
@@ -45,10 +55,9 @@ def make_event_store():
     if backend == "redis":
         url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
         prefix = os.getenv("REDIS_KEY_PREFIX", "agent:event:")
-        max_events = os.getenv("REDIS_MAX_EVENTS")
         return RedisEventStore(
             redis_url=url,
             key_prefix=prefix,
-            max_events=int(max_events) if max_events else None,
+            max_events=_get_positive_int_env("REDIS_MAX_EVENTS"),
         )
     return InMemoryEventStore()

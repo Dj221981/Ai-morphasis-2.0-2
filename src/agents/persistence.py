@@ -38,6 +38,17 @@ from .models import Task, TaskPriority, TaskStatus
 logger = logging.getLogger(__name__)
 
 
+def _to_priority(value: Any) -> TaskPriority:
+    if isinstance(value, TaskPriority):
+        return value
+    if value in TaskPriority.__members__:
+        return TaskPriority[str(value)]
+    try:
+        return TaskPriority(int(value))
+    except (TypeError, ValueError):
+        return TaskPriority.NORMAL
+
+
 @runtime_checkable
 class TaskRepository(Protocol):
     """Protocol for task persistence backends.
@@ -206,7 +217,9 @@ class SqlTaskRepository:
             "retry_count": task.retry_count,
             "max_retries": task.max_retries,
             "error": task.error,
-            "result": json.dumps(task.result),
+            "result": (
+                json.dumps(task.result) if task.result is not None else None
+            ),
             "execution_metadata": json.dumps(task.execution_metadata),
             "created_at": self._to_iso(task.created_at),
             "assigned_at": self._to_iso(task.assigned_at),
@@ -222,23 +235,12 @@ class SqlTaskRepository:
             normalized[field] = self._from_iso(normalized[field])
         return normalized
 
-    @staticmethod
-    def _to_priority(value: Any) -> TaskPriority:
-        if isinstance(value, TaskPriority):
-            return value
-        if value in TaskPriority.__members__:
-            return TaskPriority[str(value)]
-        try:
-            return TaskPriority(int(value))
-        except (TypeError, ValueError):
-            return TaskPriority.NORMAL
-
     def _deserialize(self, row: Any) -> Task:
         data = dict(row)
         return Task(
             id=data["id"],
             description=data["description"],
-            priority=self._to_priority(data["priority"]),
+            priority=_to_priority(data["priority"]),
             assigned_to=data.get("assigned_to"),
             status=TaskStatus(data["status"]),
             created_at=self._from_iso(data.get("created_at")) or datetime.now(),
@@ -362,7 +364,9 @@ class RedisTaskRepository:
             "retry_count": str(task.retry_count),
             "max_retries": str(task.max_retries),
             "error": task.error or "",
-            "result": json.dumps(task.result),
+            "result": (
+                json.dumps(task.result) if task.result is not None else ""
+            ),
             "execution_metadata": json.dumps(task.execution_metadata),
             "created_at": self._to_iso(task.created_at),
             "assigned_at": self._to_iso(task.assigned_at),
@@ -376,14 +380,18 @@ class RedisTaskRepository:
         return Task(
             id=data["id"],
             description=data.get("description", ""),
-            priority=SqlTaskRepository._to_priority(data.get("priority")),
+            priority=_to_priority(data.get("priority")),
             assigned_to=data.get("assigned_to") or None,
             status=TaskStatus(data.get("status", TaskStatus.PENDING.value)),
             created_at=self._from_iso(data.get("created_at")) or datetime.now(),
             assigned_at=self._from_iso(data.get("assigned_at")),
             started_at=self._from_iso(data.get("started_at")),
             completed_at=self._from_iso(data.get("completed_at")),
-            result=json.loads(data.get("result", "null")),
+            result=(
+                json.loads(data.get("result", "null"))
+                if data.get("result")
+                else None
+            ),
             error=data.get("error") or None,
             parameters=json.loads(data.get("parameters", "{}")),
             dependencies=json.loads(data.get("dependencies", "[]")),
@@ -404,7 +412,7 @@ class RedisTaskRepository:
             pipe.zadd(self._index_key, {task.id: created_at.timestamp()})
             if self._ttl_seconds and payload["status"] in self._TERMINAL_STATUSES:
                 pipe.expire(task_key, self._ttl_seconds)
-            elif self._ttl_seconds:
+            elif self._ttl_seconds and self._client.ttl(task_key) > 0:
                 pipe.persist(task_key)
             pipe.execute()
 
