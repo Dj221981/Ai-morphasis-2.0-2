@@ -9,7 +9,7 @@ import logging
 import threading
 import random
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Callable
+from typing import Any, Dict, List, Optional, Callable, Set
 from datetime import datetime, timedelta
 
 from .models import (
@@ -55,8 +55,8 @@ class BaseAgent(ABC):
         self.max_active_tasks = max_active_tasks
 
         self.parent_agent: Optional[str] = None
-        self.child_agents: set = set()
-        self.peer_agents: set = set()
+        self.child_agents: Set[str] = set()
+        self.peer_agents: Set[str] = set()
 
         self.performance_metrics = {
             "tasks_completed": 0,
