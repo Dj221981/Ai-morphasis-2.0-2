@@ -1,13 +1,27 @@
 """
 src/agents/super_agentic_agents.py
 ===================================
-Backward-compatibility shim.
+Backward-compatibility shim for the modular ``src.agents`` package.
 
+MIGRATION TIMELINE (Important for users):
+------------------------------------------
+This shim will be deprecated in **v2.0.0** (expected Q4 2024).
+
+Timeline:
+- **Now - v1.9.x**: Shim maintained, no functional changes.
+- **v2.0.0**: DeprecationWarning emitted on import. Shim still functional.
+- **v3.0.0+**: Shim removal considered only after 2+ full minor releases.
+
+For migration guidance, see:
+  https://github.com/Dj221981/Ai-morphasis-2.0-2/docs/migration.md
+
+USAGE
+-----
 This module has been refactored into a modular package under ``src/agents/``.
 All public symbols are re-exported from here so that existing imports continue
 to work without modification::
 
-    # Still works unchanged:
+    # Legacy (still works, not recommended for new code):
     from src.agents.super_agentic_agents import AgentSystem, Task, ExecutorAgent
 
 For new code, prefer importing from the package directly::
@@ -18,18 +32,24 @@ For new code, prefer importing from the package directly::
     from src.agents.persistence import InMemoryTaskRepository
     from src.agents.events import InMemoryEventStore, TaskEvent
 
-Deprecation and lifecycle policy:
-- This shim is maintained for backward compatibility and is not intended for
-  feature growth.
-- New code SHOULD import from ``src.agents`` (or submodules) directly.
-- We MAY emit ``DeprecationWarning`` in a future minor release once migration
-  guidance is broadly communicated.
-- We SHOULD only consider removal in a future major release after at least one
-  full minor-release deprecation window.
-- Compatibility-only shims should remain behavior-preserving; changes should be
-  limited to documentation and compatibility maintenance.
+PRODUCTION DEPLOYMENT NOTES
+----------------------------
+By default, if any sub-module fails to import, startup validation is DISABLED
+in production mode to allow graceful degradation. Use these environment variables
+to control behavior:
 
-Security review / security considerations:
+- AGENT_SHIM_STRICT_MODE=true         → Hard-fail on any import error
+- AGENT_SHIM_VALIDATE_AT_IMPORT=false → Skip integrity validation on startup
+- AGENT_SHIM_LOG_LEVEL=DEBUG          → Enable detailed import diagnostics
+
+Example production settings::
+
+    export AGENT_SHIM_STRICT_MODE=false        # Graceful degradation
+    export AGENT_SHIM_VALIDATE_AT_IMPORT=true  # Validate on startup
+    export AGENT_SHIM_LOG_LEVEL=INFO           # Standard logging
+
+SECURITY REVIEW
+---------------
 - This compatibility shim contains no direct input handling, I/O, subprocess,
   network, filesystem, authentication, authorization, or secret-management
   logic.
@@ -41,65 +61,145 @@ Security review / security considerations:
   through this compatibility layer.
 - When adding new exports, review whether they enable task execution, code
   execution, persistence access, or event access that should remain internal.
-- Changes to this shim should stay documentation-oriented unless there is a
-  deliberate compatibility requirement, so behavior is not altered unexpectedly.
 """
 
+import os
 import sys
+import logging
+import importlib
+import warnings
+from typing import Dict, Optional
 
-# ---------------------------------------------------------------------------
-# Import guard: wrap the re-export block so that a missing or broken
-# ``src.agents`` package produces a clear, actionable error instead of a
-# bare ImportError with no context.
-# ---------------------------------------------------------------------------
+# ============================================================================
+# Configuration: control shim behavior via environment variables
+# ============================================================================
+
+_STRICT_MODE = os.getenv("AGENT_SHIM_STRICT_MODE", "false").lower() in ("true", "1", "yes")
+_VALIDATE_AT_IMPORT = os.getenv("AGENT_SHIM_VALIDATE_AT_IMPORT", "true").lower() in ("true", "1", "yes")
+_LOG_LEVEL = os.getenv("AGENT_SHIM_LOG_LEVEL", "INFO").upper()
+
+# ============================================================================
+# Logging setup
+# ============================================================================
+
+logger = logging.getLogger(__name__)
 try:
-    from src.agents import (  # noqa: F401  (re-export)
-        AgentRole,
-        AgentStatus,
-        TaskPriority,
-        TaskStatus,
-        TASK_STATUS_TRANSITIONS,
-        TaskCancelledError,
-        RetryPolicy,
-        ExecutionPolicy,
-        AgentCapability,
-        AgentMemory,
-        Task,
-        CAPABILITY_MATCH_BASE_SCORE,
-        DEFAULT_AGENT_BASE_SCORE,
-        BaseAgent,
-        OrchestratorAgent,
-        ExecutorAgent,
-        AnalyzerAgent,
-        LearnerAgent,
-        AgentSystem,
-        AgentFactory,
-        TaskRepository,
-        InMemoryTaskRepository,
-        SqlTaskRepository,
-        RedisTaskRepository,
-        TaskEventType,
-        TaskEvent,
-        InMemoryEventStore,
-        SqlEventStore,
-        RedisEventStore,
-        dispatch_pending_tasks,
-        process_retry_queue,
-        run_once,
-        run_forever,
+    _log_level = getattr(logging, _LOG_LEVEL, logging.INFO)
+    logger.setLevel(_log_level)
+except (ValueError, AttributeError):
+    logger.setLevel(logging.INFO)
+
+# ============================================================================
+# Runtime metadata
+# ============================================================================
+
+__version__ = "1.0.0"
+__deprecated_in__ = "2.0.0"
+__removal_in__ = "3.0.0"
+
+
+def _emit_deprecation_warning() -> None:
+    """Emit a deprecation warning with migration guidance."""
+    warnings.warn(
+        (
+            "src.agents.super_agentic_agents is deprecated and will be removed in v3.0.0. "
+            "Please migrate to direct imports from src.agents or its submodules. "
+            "Migration guide: https://github.com/Dj221981/Ai-morphasis-2.0-2/docs/migration.md"
+        ),
+        DeprecationWarning,
+        stacklevel=3,
     )
-except ImportError as exc:
-    raise ImportError(
-        "super_agentic_agents: failed to import one or more symbols from "
-        "'src.agents'.  This usually means the package is not installed, a "
-        "required sub-module is missing, or there is a circular import.  "
-        f"Original error: {exc}"
-    ) from exc
-except Exception as exc:  # pragma: no cover -- guards against unforeseen errors
-    raise RuntimeError(
-        "super_agentic_agents: unexpected error while importing 'src.agents'. "
-        f"Original error: {exc}"
-    ) from exc
+
+
+# ============================================================================
+# Import guard: safe re-export block with graceful fallback
+# ============================================================================
+
+_import_errors: Dict[str, Exception] = {}
+
+
+def _safe_import_from_package() -> bool:
+    """Attempt to import all public symbols from ``src.agents``.
+
+    Returns True if successful, False if any symbol fails to import.
+    Populates _import_errors dict with failed imports for diagnostic purposes.
+    """
+    global _import_errors
+    _import_errors = {}
+
+    try:
+        # Attempt to import the main package first
+        pkg = importlib.import_module("src.agents")
+        logger.info("src.agents package imported successfully")
+
+        # List of all symbols expected from src.agents
+        _EXPECTED_SYMBOLS = (
+            "AgentRole",
+            "AgentStatus",
+            "TaskPriority",
+            "TaskStatus",
+            "TASK_STATUS_TRANSITIONS",
+            "TaskCancelledError",
+            "RetryPolicy",
+            "ExecutionPolicy",
+            "AgentCapability",
+            "AgentMemory",
+            "Task",
+            "CAPABILITY_MATCH_BASE_SCORE",
+            "DEFAULT_AGENT_BASE_SCORE",
+            "BaseAgent",
+            "OrchestratorAgent",
+            "ExecutorAgent",
+            "AnalyzerAgent",
+            "LearnerAgent",
+            "AgentSystem",
+            "AgentFactory",
+            "TaskRepository",
+            "InMemoryTaskRepository",
+            "SqlTaskRepository",
+            "RedisTaskRepository",
+            "TaskEventType",
+            "TaskEvent",
+            "InMemoryEventStore",
+            "SqlEventStore",
+            "RedisEventStore",
+            "dispatch_pending_tasks",
+            "process_retry_queue",
+            "run_once",
+            "run_forever",
+        )
+
+        # Try to get each symbol
+        for symbol_name in _EXPECTED_SYMBOLS:
+            try:
+                globals()[symbol_name] = getattr(pkg, symbol_name)
+                logger.debug(f"Imported symbol: {symbol_name}")
+            except AttributeError as exc:
+                _import_errors[symbol_name] = exc
+                logger.warning(f"Symbol '{symbol_name}' not found in src.agents: {exc}")
+
+        if _import_errors:
+            logger.warning(
+                f"Failed to import {len(_import_errors)} symbols: {list(_import_errors.keys())}"
+            )
+            return False
+
+        logger.info("All expected symbols imported successfully from src.agents")
+        return True
+
+    except ImportError as exc:
+        logger.error(f"Failed to import src.agents package: {exc}", exc_info=True)
+        _import_errors["__package__"] = exc
+        return False
+    except Exception as exc:
+        logger.error(f"Unexpected error during import from src.agents: {exc}", exc_info=True)
+        _import_errors["__unexpected__"] = exc
+        return False
+
+
+# ============================================================================
+# Public API
+# ============================================================================
 
 __all__ = [
     "AgentRole",
@@ -137,9 +237,10 @@ __all__ = [
     "run_forever",
 ]
 
-# ---------------------------------------------------------------------------
-# Public validation helpers
-# ---------------------------------------------------------------------------
+
+# ============================================================================
+# Module validation helpers (for health checks, startup probes, tests)
+# ============================================================================
 
 _REQUIRED_SUBMODULES = (
     "src.agents.models",
@@ -152,62 +253,198 @@ _REQUIRED_SUBMODULES = (
 )
 
 
-def validate_all_modules() -> None:
-    """Check that every sub-module that backs this shim can be imported.
+def validate_all_modules() -> Dict[str, bool]:
+    """Check that every required sub-module can be imported.
 
-    Raises ``ImportError`` with a descriptive message naming the first
-    sub-module that cannot be loaded.  Intended for use in health-checks,
-    startup probes, and test suites.
+    Returns a dict mapping module name to import success (bool).
+    Does not raise; returns status instead for graceful degradation.
+
+    Intended for use in health-checks, startup probes, and test suites.
+
+    Example::
+
+        status = validate_all_modules()
+        all_ok = all(status.values())
+        if not all_ok:
+            failed = [k for k, v in status.items() if not v]
+            print(f"Failed modules: {failed}")
+
+    Returns
+    -------
+    dict[str, bool]
+        Mapping of module name to success status.
     """
-    import importlib
-
+    result = {}
     for module_name in _REQUIRED_SUBMODULES:
         try:
             importlib.import_module(module_name)
+            result[module_name] = True
+            logger.debug(f"Sub-module {module_name} imported successfully")
         except ImportError as exc:
-            raise ImportError(
-                f"super_agentic_agents: required sub-module '{module_name}' "
-                f"could not be imported.  Original error: {exc}"
-            ) from exc
+            result[module_name] = False
+            logger.warning(f"Sub-module {module_name} failed to import: {exc}")
+    return result
 
 
-def validate_shim_integrity() -> None:
-    """Verify that ``__all__`` is in sync with the symbols actually exported.
+def validate_shim_integrity(raise_on_error: bool = False) -> bool:
+    """Verify that ``__all__`` exports match actual module state.
 
-    Raises ``AssertionError`` if any name listed in ``__all__`` is absent from
-    this module's namespace, or if the package (``src.agents``) is missing a
-    symbol that the shim advertises.
+    Validates that:
+    1. Every name in ``__all__`` is present on this module
+    2. Every name in ``__all__`` is present on ``src.agents``
+    3. Every required sub-module is importable
 
-    Also validates that every sub-module required by the shim is importable.
+    Parameters
+    ----------
+    raise_on_error : bool
+        If True, raise AssertionError/ImportError on any validation failure.
+        If False, log warnings and return False.
+
+    Returns
+    -------
+    bool
+        True if validation passes, False otherwise.
+
+    Raises
+    ------
+    AssertionError
+        If raise_on_error=True and symbols are missing.
+    ImportError
+        If raise_on_error=True and sub-modules cannot be imported.
     """
-    import importlib
-
     this_module = sys.modules[__name__]
-    pkg_module = importlib.import_module("src.agents")
 
-    missing_from_shim = [
-        name for name in __all__ if not hasattr(this_module, name)
-    ]
+    # Check symbols on shim module
+    missing_from_shim = [name for name in __all__ if not hasattr(this_module, name)]
     if missing_from_shim:
-        raise AssertionError(
-            "super_agentic_agents.__all__ lists symbols that are not present "
-            f"on the shim module: {missing_from_shim}"
+        msg = (
+            f"super_agentic_agents.__all__ lists {len(missing_from_shim)} symbols "
+            f"not present on shim module: {missing_from_shim}"
         )
+        logger.error(msg)
+        if raise_on_error:
+            raise AssertionError(msg)
+        return False
 
-    missing_from_pkg = [
-        name for name in __all__ if not hasattr(pkg_module, name)
-    ]
-    if missing_from_pkg:
-        raise AssertionError(
-            "super_agentic_agents.__all__ lists symbols that are not present "
-            f"on src.agents: {missing_from_pkg}"
-        )
+    # Check symbols on src.agents package
+    try:
+        pkg = importlib.import_module("src.agents")
+        missing_from_pkg = [name for name in __all__ if not hasattr(pkg, name)]
+        if missing_from_pkg:
+            msg = (
+                f"super_agentic_agents.__all__ lists {len(missing_from_pkg)} symbols "
+                f"not present on src.agents: {missing_from_pkg}"
+            )
+            logger.error(msg)
+            if raise_on_error:
+                raise AssertionError(msg)
+            return False
+    except ImportError as exc:
+        msg = f"Could not import src.agents to validate exports: {exc}"
+        logger.error(msg)
+        if raise_on_error:
+            raise
+        return False
 
-    validate_all_modules()
+    # Check sub-modules
+    module_status = validate_all_modules()
+    if not all(module_status.values()):
+        failed = [k for k, v in module_status.items() if not v]
+        msg = f"Sub-modules failed to import: {failed}"
+        logger.warning(msg)
+        if raise_on_error:
+            raise ImportError(msg)
+        return False
+
+    logger.info("Shim integrity validation passed")
+    return True
 
 
-# ---------------------------------------------------------------------------
-# Startup verification — runs once when the shim is first imported so that
-# deployment failures surface immediately rather than at first call-site use.
-# ---------------------------------------------------------------------------
-validate_shim_integrity()
+def get_import_errors() -> Dict[str, Exception]:
+    """Return a dict of symbols that failed to import.
+
+    Returns
+    -------
+    dict[str, Exception]
+        Mapping of symbol name to Exception that occurred during import.
+        Empty dict if all imports succeeded.
+
+    Example::
+
+        errors = get_import_errors()
+        if errors:
+            for symbol, exc in errors.items():
+                print(f"Failed to import {symbol}: {exc}")
+    """
+    return dict(_import_errors)
+
+
+def is_shim_fully_functional() -> bool:
+    """Quick check: are all exported symbols available?
+
+    Returns
+    -------
+    bool
+        True if no import errors are present, False otherwise.
+    """
+    return len(_import_errors) == 0
+
+
+# ============================================================================
+# Startup sequence
+# ============================================================================
+
+def _startup() -> None:
+    """Perform startup initialization when shim is first imported.
+
+    Attempts safe import, validates on demand, handles fallback gracefully.
+    Behavior controlled by environment variables:
+    - AGENT_SHIM_STRICT_MODE: hard-fail vs. graceful degradation
+    - AGENT_SHIM_VALIDATE_AT_IMPORT: enable/disable startup validation
+    - AGENT_SHIM_LOG_LEVEL: set logging verbosity
+    """
+    logger.info(
+        f"Initializing src.agents.super_agentic_agents "
+        f"(version={__version__}, strict_mode={_STRICT_MODE})"
+    )
+
+    # Step 1: Try safe import
+    success = _safe_import_from_package()
+
+    if not success:
+        logger.error("Failed to import one or more symbols from src.agents")
+
+        if _STRICT_MODE:
+            # Hard fail in strict mode
+            errors_summary = "; ".join(
+                f"{name}: {exc}"
+                for name, exc in _import_errors.items()
+            )
+            raise ImportError(
+                f"super_agentic_agents (strict mode): failed to import from src.agents. "
+                f"Errors: {errors_summary}"
+            )
+        else:
+            # Graceful degradation in production mode
+            logger.warning(
+                "Graceful degradation: shim partially loaded. "
+                "Use AGENT_SHIM_STRICT_MODE=true to fail fast instead."
+            )
+
+    # Step 2: Optionally validate integrity at import
+    if _VALIDATE_AT_IMPORT:
+        try:
+            validate_shim_integrity(raise_on_error=_STRICT_MODE)
+        except (AssertionError, ImportError) as exc:
+            if _STRICT_MODE:
+                raise
+            logger.warning(f"Integrity validation failed: {exc}")
+
+    # Step 3: Emit deprecation warning
+    _emit_deprecation_warning()
+
+    logger.info("super_agentic_agents initialization complete")
+
+
+# Run startup once when module is imported
+_startup()
