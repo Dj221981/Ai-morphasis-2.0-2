@@ -1,27 +1,26 @@
 """
-src/agents/super_agentic_agents.py
-===================================
-Backward-compatibility shim.
+src/agents/__init__.py
+======================
+Public API for the super-agentic agent framework package.
 
-This module has been refactored into a modular package under ``src/agents/``.
-All public symbols are re-exported from here so that existing imports continue
-to work without modification::
-
-    # Still works unchanged:
-    from src.agents.super_agentic_agents import AgentSystem, Task, ExecutorAgent
-
-For new code, prefer importing from the package directly::
+All public symbols are re-exported here so that callers can import from
+either the top-level package::
 
     from src.agents import AgentSystem, Task, ExecutorAgent
+
+or from specific sub-modules::
+
     from src.agents.models import RetryPolicy, ExecutionPolicy
     from src.agents.runtime import run_once, run_forever
     from src.agents.persistence import InMemoryTaskRepository
     from src.agents.events import InMemoryEventStore, TaskEvent
+
+Backward compatibility is maintained by the ``super_agentic_agents`` shim
+module which re-exports everything from this package.
 """
 
-# Re-export everything from the package so that all existing imports continue
-# to work without modification.
-from src.agents import (  # noqa: F401  (re-export)
+# Models / domain types
+from .models import (
     AgentRole,
     AgentStatus,
     TaskPriority,
@@ -35,52 +34,68 @@ from src.agents import (  # noqa: F401  (re-export)
     Task,
     CAPABILITY_MATCH_BASE_SCORE,
     DEFAULT_AGENT_BASE_SCORE,
-    BaseAgent,
+)
+
+# Base class
+from .base import BaseAgent
+
+# Specialized agents
+from .specialized import (
     OrchestratorAgent,
     ExecutorAgent,
     AnalyzerAgent,
     LearnerAgent,
-    AgentSystem,
-    AgentFactory,
-    example_usage,
-    TaskRepository,
-    InMemoryTaskRepository,
-    TaskEventType,
-    TaskEvent,
-    InMemoryEventStore,
-    dispatch_pending_tasks,
-    process_retry_queue,
-    run_once,
-    run_forever,
 )
 
+# System orchestration
+from .system import AgentSystem, AgentFactory, example_usage
+
+# Persistence layer
+from .persistence import TaskRepository, InMemoryTaskRepository
+
+# Event journal
+from .events import TaskEventType, TaskEvent, InMemoryEventStore
+
+# Runtime / scheduler
+from .runtime import dispatch_pending_tasks, process_retry_queue, run_once, run_forever
+
 __all__ = [
+    # Enums
     "AgentRole",
     "AgentStatus",
     "TaskPriority",
     "TaskStatus",
+    # Constants / tables
     "TASK_STATUS_TRANSITIONS",
+    "CAPABILITY_MATCH_BASE_SCORE",
+    "DEFAULT_AGENT_BASE_SCORE",
+    # Errors
     "TaskCancelledError",
+    # Policy types
     "RetryPolicy",
     "ExecutionPolicy",
+    # Domain models
     "AgentCapability",
     "AgentMemory",
     "Task",
-    "CAPABILITY_MATCH_BASE_SCORE",
-    "DEFAULT_AGENT_BASE_SCORE",
+    # Agent classes
     "BaseAgent",
     "OrchestratorAgent",
     "ExecutorAgent",
     "AnalyzerAgent",
     "LearnerAgent",
+    # System
     "AgentSystem",
     "AgentFactory",
     "example_usage",
+    # Persistence
     "TaskRepository",
     "InMemoryTaskRepository",
+    # Events
     "TaskEventType",
     "TaskEvent",
     "InMemoryEventStore",
+    # Runtime
     "dispatch_pending_tasks",
     "process_retry_queue",
     "run_once",
