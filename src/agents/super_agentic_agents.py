@@ -17,6 +17,15 @@ For new code, prefer importing from the package directly::
     from src.agents.runtime import run_once, run_forever
     from src.agents.persistence import InMemoryTaskRepository
     from src.agents.events import InMemoryEventStore, TaskEvent
+
+Security review note:
+- This compatibility shim contains no direct input handling, I/O, subprocess,
+  network, filesystem, authentication, authorization, or secret-management
+  logic.
+- Its security posture depends on the safety of the modules re-exported from
+  ``src.agents``.
+- Keep exports limited to intended public APIs to avoid unintentionally exposing
+  internal or privileged functionality.
 """
 
 # Re-export everything from the package so that all existing imports continue
