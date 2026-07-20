@@ -23,6 +23,7 @@ Covers:
 
 import pytest
 from unittest.mock import patch
+from datetime import datetime, timedelta
 
 from src.agents.super_agentic_agents import (
     AgentCapability,
@@ -354,15 +355,15 @@ class TestBaseAgent:
 
         assert t.id not in agent.active_tasks
 
-    def test_force_task_status_retrying(self, executor, task):
-        """_force_task_status sets status and timestamps correctly."""
+    def test_force_task_status_disallowed_by_default(self, executor, task):
         task.transition_to(TaskStatus.ASSIGNED)
-        executor._force_task_status(task, TaskStatus.RETRYING)
-        assert task.status == TaskStatus.RETRYING
-        assert task.last_retry_at is not None
+        with pytest.raises(RuntimeError, match="Refused forced status transition"):
+            executor._force_task_status(task, TaskStatus.RETRYING)
 
-    def test_force_task_status_failed(self, executor, task):
+    def test_force_task_status_allowed_when_explicitly_enabled(self, executor, task):
         task.transition_to(TaskStatus.ASSIGNED)
+        executor.enable_forced_status_fallback = True
+        task.metadata["allow_forced_status_fallback"] = True
         executor._force_task_status(task, TaskStatus.FAILED)
         assert task.status == TaskStatus.FAILED
         assert task.completed_at is not None
@@ -393,6 +394,35 @@ class TestOrchestratorAgent:
 
         best = orch._select_best_agent(Task(description="new"))
         assert best is a2
+
+    def test_select_best_agent_respects_required_capabilities(self):
+        orch = OrchestratorAgent("orch")
+        general = ExecutorAgent("general")
+        specialist = ExecutorAgent("specialist")
+        specialist.register_capability(
+            AgentCapability(name="data_analysis", description="analyze")
+        )
+        orch.register_agent(general)
+        orch.register_agent(specialist)
+
+        task = Task(
+            description="analysis",
+            parameters={"required_capabilities": ["data_analysis"]},
+        )
+        best = orch._select_best_agent(task)
+        assert best is specialist
+
+    def test_select_best_agent_returns_none_when_capabilities_missing(self):
+        orch = OrchestratorAgent("orch")
+        agent = ExecutorAgent("general")
+        orch.register_agent(agent)
+
+        task = Task(
+            description="special",
+            parameters={"required_capabilities": ["missing_capability"]},
+        )
+        best = orch._select_best_agent(task)
+        assert best is None
 
     def test_select_best_agent_skips_suspended(self):
         orch = OrchestratorAgent("orch")
@@ -502,6 +532,22 @@ class TestAgentSystem:
         with pytest.raises(ValueError, match="description must not be empty"):
             system.create_task("   ", {})
 
+    def test_create_task_non_dict_parameters_raises(self, system):
+        with pytest.raises(TypeError, match="parameters must be a dictionary"):
+            system.create_task("bad-params", [])
+
+    def test_create_task_negative_retries_raises(self, system):
+        with pytest.raises(ValueError, match="max_retries must be a non-negative integer"):
+            system.create_task("bad-retries", {}, max_retries=-1)
+
+    def test_create_task_invalid_required_capabilities_raises(self, system):
+        with pytest.raises(ValueError, match="required_capabilities"):
+            system.create_task("bad-caps", {"required_capabilities": ["", 1]})
+
+    def test_create_task_invalid_timeout_raises(self, system):
+        with pytest.raises(ValueError, match="timeout_seconds"):
+            system.create_task("bad-timeout", {"timeout_seconds": 0})
+
     def test_submit_task_removes_from_global_queue(self, system):
         agent = ExecutorAgent("exec")
         system.add_agent(agent)
@@ -552,6 +598,7 @@ class TestAgentSystem:
 
         assert t.status == TaskStatus.RETRYING
         assert any(x.id == t.id for x in system.global_task_queue)
+        assert t.next_retry_at is not None
 
     def test_execute_task_retry_no_duplicate_requeue(self, system):
         """Calling execute_task twice on a retrying task must not add duplicates."""
@@ -580,6 +627,68 @@ class TestAgentSystem:
         queue_count = sum(1 for x in system.global_task_queue if x.id == t.id)
         assert queue_count == 1
 
+    def test_submit_task_skips_retry_until_due(self, system):
+        agent = ExecutorAgent("exec")
+        system.add_agent(agent)
+        t = system.create_task("delayed", {})
+        t.transition_to(TaskStatus.ASSIGNED)
+        t.transition_to(TaskStatus.RUNNING)
+        t.transition_to(TaskStatus.RETRYING)
+        t.next_retry_at = datetime.now() + timedelta(seconds=60)
+
+        assert system.submit_task(t, agent.id) is False
+        assert t.id not in agent.active_tasks
+
+        t.next_retry_at = datetime.now() - timedelta(seconds=1)
+        assert system.submit_task(t, agent.id) is True
+
+    def test_execute_task_cancellation_hook_sets_cancelled(self, system):
+        class CancelAgent(ExecutorAgent):
+            def think(self, input_data):
+                return input_data
+
+            def act(self, decision):
+                return {"ok": True}
+
+        agent = CancelAgent("cancel")
+        system.add_agent(agent)
+        t = system.create_task(
+            "cancel-me",
+            {"metadata": {"cancellation_check": lambda task: True}},
+        )
+        t.max_retries = 3
+        system.submit_task(t, agent.id)
+
+        with pytest.raises(RuntimeError, match="cancellation hook requested stop"):
+            system.execute_task(t.id, agent.id)
+
+        assert t.status == TaskStatus.CANCELLED
+        assert t.retry_count == 0
+        assert t.next_retry_at is None
+
+    def test_execute_task_timeout_sets_retry_schedule(self, system):
+        class SlowAgent(ExecutorAgent):
+            def think(self, input_data):
+                return input_data
+
+            def act(self, decision):
+                return {"ok": True}
+
+        agent = SlowAgent("slow")
+        system.add_agent(agent)
+        t = system.create_task(
+            "timeout",
+            {"timeout_seconds": 1e-9, "metadata": {"retry_jitter_seconds": 0}},
+        )
+        t.max_retries = 1
+        system.submit_task(t, agent.id)
+
+        with pytest.raises(TimeoutError):
+            system.execute_task(t.id, agent.id)
+
+        assert t.status == TaskStatus.RETRYING
+        assert t.next_retry_at is not None
+
     def test_execute_task_unknown_agent_raises(self, system):
         t = system.create_task("task", {})
         with pytest.raises(ValueError, match="not found"):
@@ -596,6 +705,31 @@ class TestAgentSystem:
         assert "agents" in status
         assert "metrics" in status
         assert "pending_tasks" in status
+
+
+class TestAgentSystemObservabilityHooks:
+    def test_persistence_hook_receives_task_events(self, system):
+        events = []
+        system.set_persistence_hook(lambda event, task: events.append((event, task.id)))
+
+        t = system.create_task("persist-me", {})
+
+        assert events
+        assert events[0][0] == "created"
+        assert events[0][1] == t.id
+
+    def test_telemetry_hook_receives_structured_events(self, system):
+        events = []
+        system.set_telemetry_hook(lambda event, payload: events.append((event, payload)))
+
+        t = system.create_task("telemetry", {})
+
+        created_events = [evt for evt in events if evt[0] == "task_created"]
+        assert created_events
+        payload = created_events[0][1]
+        assert payload["task_id"] == t.id
+        assert payload["system_id"] == system.id
+        assert payload["event"] == "task_created"
 
 
 # ---------------------------------------------------------------------------

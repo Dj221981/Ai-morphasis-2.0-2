@@ -18,10 +18,11 @@ Features:
 import uuid
 import logging
 import threading
+import random
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Callable, Set
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 import json
 
@@ -82,6 +83,10 @@ TASK_STATUS_TRANSITIONS: Dict[TaskStatus, Set[TaskStatus]] = {
     TaskStatus.FAILED: set(),
     TaskStatus.CANCELLED: set(),
 }
+
+
+class TaskCancelledError(RuntimeError):
+    """Raised when task execution is cancelled."""
 
 
 @dataclass
@@ -167,6 +172,8 @@ class Task:
     retry_count: int = 0
     max_retries: int = 3
     last_retry_at: Optional[datetime] = None
+    next_retry_at: Optional[datetime] = None
+    execution_metadata: Dict[str, Any] = field(default_factory=dict)
 
     def transition_to(self, new_status: TaskStatus) -> bool:
         """Perform guarded task status transition."""
@@ -211,6 +218,8 @@ class Task:
             "retry_count": self.retry_count,
             "max_retries": self.max_retries,
             "last_retry_at": self.last_retry_at.isoformat() if self.last_retry_at else None,
+            "next_retry_at": self.next_retry_at.isoformat() if self.next_retry_at else None,
+            "execution_metadata": self.execution_metadata,
         }
 
 
@@ -257,6 +266,8 @@ class BaseAgent(ABC):
         }
 
         self._lock = threading.RLock()
+        self.enable_forced_status_fallback = False
+        self.telemetry_hook: Optional[Callable[[str, Dict[str, Any]], None]] = None
 
         logger.info(f"Initialized {self.role.value} agent: {self.name} (ID: {self.id})")
 
@@ -323,7 +334,10 @@ class BaseAgent(ABC):
     def execute_task(self, task: Task) -> Any:
         """Execute an assigned task with retry and safe cleanup semantics."""
         start_time = datetime.now()
-        should_retry = False
+        attempt = task.retry_count + 1
+        task.execution_metadata["attempt"] = attempt
+        task.execution_metadata["agent_id"] = self.id
+        task.execution_metadata["started_at"] = start_time.isoformat()
 
         try:
             with self._lock:
@@ -341,12 +355,18 @@ class BaseAgent(ABC):
                     )
 
             logger.info(f"Agent {self.name} executing task {task.id}")
+            self._emit_telemetry("task_started", task, {"attempt": attempt})
+
+            self._raise_if_cancelled(task)
 
             # Think phase
             reasoning = self.think(task.parameters)
+            self._raise_if_timed_out(task, start_time)
+            self._raise_if_cancelled(task)
 
             # Act phase
             result = self.act(reasoning)
+            self._raise_if_timed_out(task, start_time)
 
             with self._lock:
                 if not task.transition_to(TaskStatus.COMPLETED):
@@ -360,26 +380,47 @@ class BaseAgent(ABC):
                 self._update_metrics(task, success=True, started_at=start_time)
                 self.status = AgentStatus.IDLE
                 self.last_activity = datetime.now()
+                task.next_retry_at = None
+                task.execution_metadata["duration_seconds"] = max(
+                    (datetime.now() - start_time).total_seconds(),
+                    0.0,
+                )
+                task.execution_metadata["completed_at"] = datetime.now().isoformat()
+                task.execution_metadata["failure_reason"] = None
 
             logger.info(f"Task {task.id} completed successfully")
+            self._emit_telemetry("task_completed", task, {"attempt": attempt})
             return result
 
         except Exception as e:
             with self._lock:
                 task.error = str(e)
+                now = datetime.now()
+                task.execution_metadata["duration_seconds"] = max(
+                    (now - start_time).total_seconds(),
+                    0.0,
+                )
+                task.execution_metadata["completed_at"] = now.isoformat()
+                task.execution_metadata["failure_reason"] = type(e).__name__
 
-                if task.retry_count < task.max_retries:
+                is_cancelled = isinstance(e, TaskCancelledError)
+
+                if is_cancelled:
+                    if task.status != TaskStatus.CANCELLED and not task.transition_to(TaskStatus.CANCELLED):
+                        self._force_task_status(task, TaskStatus.CANCELLED)
+                    task.next_retry_at = None
+                elif task.retry_count < task.max_retries:
                     task.retry_count += 1
                     # The task may already be in RETRYING state from a prior retry
                     # iteration; skip the transition in that case.
                     if task.status != TaskStatus.RETRYING:
                         if not task.transition_to(TaskStatus.RETRYING):
-                            # Last-resort fallback: guarded transition unavailable from current state
                             self._force_task_status(task, TaskStatus.RETRYING)
+                    task.next_retry_at = self._calculate_next_retry_at(task)
                 else:
                     if not task.transition_to(TaskStatus.FAILED) and task.status != TaskStatus.FAILED:
-                        # Last-resort fallback: guarded transition unavailable from current state
                         self._force_task_status(task, TaskStatus.FAILED)
+                    task.next_retry_at = None
 
                 self.task_history.append(task)
                 self._update_metrics(task, success=False, started_at=start_time)
@@ -391,6 +432,11 @@ class BaseAgent(ABC):
                 logger.info(
                     f"Task {task.id} marked for retry ({task.retry_count}/{task.max_retries})"
                 )
+            self._emit_telemetry(
+                "task_failed",
+                task,
+                {"attempt": attempt, "error_type": type(e).__name__, "error": str(e)},
+            )
             raise
 
         finally:
@@ -411,6 +457,15 @@ class BaseAgent(ABC):
         been attempted and failed.  It logs a warning so the bypass is always
         visible in logs and avoids silently hiding model inconsistencies.
         """
+        if not (
+            self.enable_forced_status_fallback
+            and bool(task.metadata.get("allow_forced_status_fallback"))
+        ):
+            raise RuntimeError(
+                f"Refused forced status transition for task {task.id}: "
+                f"{task.status.value} -> {new_status.value}"
+            )
+
         logger.warning(
             "Task %s: forced status %s -> %s "
             "(guarded transition unavailable from current state)",
@@ -422,6 +477,51 @@ class BaseAgent(ABC):
             task.last_retry_at = now
         elif new_status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
             task.completed_at = now
+
+    def _emit_telemetry(self, event: str, task: Task, payload: Optional[Dict[str, Any]] = None) -> None:
+        """Emit a structured telemetry event for observability hooks."""
+        if not self.telemetry_hook:
+            return
+        telemetry_payload = {
+            "event": event,
+            "agent_id": self.id,
+            "agent_name": self.name,
+            "task_id": task.id,
+            "task_status": task.status.value,
+            "timestamp": datetime.now().isoformat(),
+        }
+        if payload:
+            telemetry_payload.update(payload)
+        self.telemetry_hook(event, telemetry_payload)
+
+    def _calculate_next_retry_at(self, task: Task) -> datetime:
+        """Calculate retry schedule using bounded exponential backoff + jitter."""
+        metadata = task.metadata
+        base_delay = float(metadata.get("retry_backoff_base_seconds", 1.0))
+        max_delay = float(metadata.get("retry_backoff_max_seconds", 30.0))
+        jitter_max = float(metadata.get("retry_jitter_seconds", 0.5))
+        retry_index = max(task.retry_count - 1, 0)
+        backoff = min(base_delay * (2 ** retry_index), max_delay)
+        jitter = random.uniform(0.0, max(jitter_max, 0.0))
+        return datetime.now() + timedelta(seconds=backoff + jitter)
+
+    def _raise_if_timed_out(self, task: Task, started_at: datetime) -> None:
+        timeout_seconds = task.metadata.get("timeout_seconds")
+        if timeout_seconds is None:
+            return
+        elapsed = (datetime.now() - started_at).total_seconds()
+        if elapsed > float(timeout_seconds):
+            raise TimeoutError(
+                f"Task {task.id} timed out after {elapsed:.3f}s "
+                f"(limit: {float(timeout_seconds):.3f}s)"
+            )
+
+    def _raise_if_cancelled(self, task: Task) -> None:
+        if task.status == TaskStatus.CANCELLED or bool(task.metadata.get("cancel_requested")):
+            raise TaskCancelledError(f"Task {task.id} was cancelled before completion")
+        cancellation_check = task.metadata.get("cancellation_check")
+        if callable(cancellation_check) and cancellation_check(task):
+            raise TaskCancelledError(f"Task {task.id} cancellation hook requested stop")
 
     def _update_metrics(self, task: Task, success: bool, started_at: Optional[datetime] = None) -> None:
         """Update performance metrics with rolling average duration."""
@@ -519,14 +619,36 @@ class OrchestratorAgent(BaseAgent):
         """Select best agent for task based on capabilities."""
         available_agents = [
             a for a in self.managed_agents.values()
-            if a.status != AgentStatus.SUSPENDED
+            if a.status != AgentStatus.SUSPENDED and len(a.active_tasks) < a.max_active_tasks
         ]
 
         if not available_agents:
             return None
 
-        # Simple scoring: prefer less busy agents
-        return min(available_agents, key=lambda a: len(a.active_tasks))
+        required_capabilities = task.metadata.get("required_capabilities")
+        if required_capabilities is None:
+            required_capabilities = task.parameters.get("required_capabilities", [])
+
+        required = {
+            cap.strip() for cap in required_capabilities
+            if isinstance(cap, str) and cap.strip()
+        }
+
+        scored_agents: List[tuple[float, BaseAgent]] = []
+        for agent in available_agents:
+            agent_caps = set(agent.list_capabilities())
+            if required and not required.issubset(agent_caps):
+                continue
+            capability_score = 1.0 if not required else len(required & agent_caps) / len(required)
+            load_ratio = len(agent.active_tasks) / max(agent.max_active_tasks, 1)
+            score = (capability_score * 2.0) - load_ratio
+            scored_agents.append((score, agent))
+
+        if not scored_agents:
+            return None
+
+        scored_agents.sort(key=lambda item: (item[0], -len(item[1].active_tasks)), reverse=True)
+        return scored_agents[0][1]
 
     def get_system_status(self) -> Dict[str, Any]:
         """Get status of entire agent system."""
@@ -666,6 +788,8 @@ class AgentSystem:
         }
 
         self._lock = threading.RLock()
+        self.persistence_hook: Optional[Callable[[str, Task], None]] = None
+        self.telemetry_hook: Optional[Callable[[str, Dict[str, Any]], None]] = None
 
         logger.info(f"Initialized Agent System: {self.name}")
 
@@ -674,8 +798,13 @@ class AgentSystem:
         with self._lock:
             self.agents[agent.id] = agent
             self.orchestrator.register_agent(agent)
+            agent.telemetry_hook = self._emit_telemetry
             self.system_metrics["total_agents"] += 1
         logger.info(f"Agent {agent.name} added to system")
+        self._emit_telemetry(
+            "agent_added",
+            {"agent_id": agent.id, "agent_name": agent.name, "role": agent.role.value},
+        )
         return True
 
     def remove_agent(self, agent_id: str) -> bool:
@@ -716,6 +845,10 @@ class AgentSystem:
             agent.child_agents.clear()
 
             logger.info(f"Agent {agent.name} removed from system")
+            self._emit_telemetry(
+                "agent_removed",
+                {"agent_id": agent.id, "agent_name": agent.name, "role": agent.role.value},
+            )
             return True
 
     def get_agent(self, agent_id: str) -> Optional[BaseAgent]:
@@ -733,32 +866,74 @@ class AgentSystem:
         """Create a new task."""
         if not description or not description.strip():
             raise ValueError("Task description must not be empty")
+        if not isinstance(parameters, dict):
+            raise TypeError("Task parameters must be a dictionary")
+        if not isinstance(priority, TaskPriority):
+            raise TypeError("Task priority must be a TaskPriority enum value")
+        if not isinstance(max_retries, int) or max_retries < 0:
+            raise ValueError("Task max_retries must be a non-negative integer")
+
+        metadata = parameters.get("metadata", {})
+        if metadata is not None and not isinstance(metadata, dict):
+            raise TypeError("Task metadata must be a dictionary")
+
+        timeout_seconds = parameters.get("timeout_seconds")
+        if timeout_seconds is not None and float(timeout_seconds) <= 0:
+            raise ValueError("Task timeout_seconds must be greater than 0 when provided")
+
+        required_capabilities = parameters.get("required_capabilities")
+        if required_capabilities is not None and (
+            not isinstance(required_capabilities, list)
+            or any(not isinstance(cap, str) or not cap.strip() for cap in required_capabilities)
+        ):
+            raise ValueError("Task required_capabilities must be a non-empty string list")
+
         task = Task(
             description=description,
             parameters=parameters,
             priority=priority,
             max_retries=max_retries,
+            metadata=dict(metadata) if isinstance(metadata, dict) else {},
         )
+        if timeout_seconds is not None:
+            task.metadata["timeout_seconds"] = float(timeout_seconds)
+        if required_capabilities is not None:
+            task.metadata["required_capabilities"] = [cap.strip() for cap in required_capabilities]
         with self._lock:
             self.global_task_queue.append(task)
             self.task_registry[task.id] = task
             self.system_metrics["total_tasks"] += 1
+            self._persist_task("created", task)
         logger.info(f"Task {task.id} created: {description}")
+        self._emit_telemetry(
+            "task_created",
+            {"task_id": task.id, "priority": task.priority.name, "max_retries": task.max_retries},
+        )
         return task
 
     def submit_task(self, task: Task, agent_id: Optional[str] = None) -> bool:
         """Submit a task to an agent for execution."""
+        if task.status == TaskStatus.RETRYING and not self._is_retry_due(task):
+            logger.info(
+                "Task %s retry is scheduled for %s; skipping immediate assignment",
+                task.id,
+                task.next_retry_at.isoformat() if task.next_retry_at else "unknown",
+            )
+            return False
+
         if agent_id:
             agent = self.get_agent(agent_id)
             if agent:
                 assigned = agent.assign_task(task)
                 if assigned:
                     self._remove_from_global_queue(task.id)
+                    self._persist_task("submitted", task)
                 return assigned
         else:
             assigned = self.orchestrator.distribute_task(task)
             if assigned:
                 self._remove_from_global_queue(task.id)
+                self._persist_task("submitted", task)
             return assigned
 
         logger.warning(f"Failed to submit task {task.id}")
@@ -782,6 +957,7 @@ class AgentSystem:
                     self.completed_tasks.append(task)
                     self.system_metrics["successful_tasks"] += 1
                 self._update_system_task_duration(task, start_time)
+                self._persist_task("completed", task)
             return result
         except Exception:
             with self._lock:
@@ -789,8 +965,12 @@ class AgentSystem:
                     # Requeue for retry dispatch, guarding against duplicates
                     if not any(t.id == task.id for t in self.global_task_queue):
                         self.global_task_queue.append(task)
+                    self._persist_task("retry_scheduled", task)
+                elif task.status == TaskStatus.CANCELLED:
+                    self._persist_task("cancelled", task)
                 elif task.status == TaskStatus.FAILED:
                     self.system_metrics["failed_tasks"] += 1
+                    self._persist_task("failed", task)
                 self._update_system_task_duration(task, start_time)
             raise
 
@@ -811,6 +991,39 @@ class AgentSystem:
 
         current_avg = self.system_metrics.get("avg_task_duration", 0.0)
         self.system_metrics["avg_task_duration"] = ((current_avg * (completed - 1)) + duration) / completed
+
+    def _is_retry_due(self, task: Task) -> bool:
+        """Return True when retry schedule is due or unscheduled."""
+        return task.next_retry_at is None or datetime.now() >= task.next_retry_at
+
+    def set_persistence_hook(self, hook: Optional[Callable[[str, Task], None]]) -> None:
+        """Register persistence extension hook invoked on task lifecycle events."""
+        self.persistence_hook = hook
+
+    def set_telemetry_hook(self, hook: Optional[Callable[[str, Dict[str, Any]], None]]) -> None:
+        """Register structured telemetry extension hook."""
+        self.telemetry_hook = hook
+        self.orchestrator.telemetry_hook = self._emit_telemetry
+        for agent in self.agents.values():
+            agent.telemetry_hook = self._emit_telemetry
+
+    def _persist_task(self, event: str, task: Task) -> None:
+        """Invoke persistence extension hook, if configured."""
+        if self.persistence_hook:
+            self.persistence_hook(event, task)
+
+    def _emit_telemetry(self, event: str, payload: Dict[str, Any]) -> None:
+        """Emit structured telemetry event for system-level observability."""
+        if not self.telemetry_hook:
+            return
+        event_payload = {
+            "event": event,
+            "system_id": self.id,
+            "system_name": self.name,
+            "timestamp": datetime.now().isoformat(),
+        }
+        event_payload.update(payload)
+        self.telemetry_hook(event, event_payload)
 
     def get_system_status(self) -> Dict[str, Any]:
         """Get comprehensive system status."""
