@@ -99,6 +99,18 @@ class TestAgentCapabilityValidation:
         assert cap_low.confidence_score == 0.0
         assert cap_high.confidence_score == 1.0
 
+    def test_empty_description_raises(self):
+        with pytest.raises(ValueError, match="description must not be empty"):
+            AgentCapability(name="cap", description="")
+
+    def test_empty_version_raises(self):
+        with pytest.raises(ValueError, match="version must not be empty"):
+            AgentCapability(name="cap", description="desc", version=" ")
+
+    def test_blank_version_raises(self):
+        with pytest.raises(ValueError, match="version must not be empty"):
+            AgentCapability(name="cap", description="desc", version="")
+
 
 # ---------------------------------------------------------------------------
 # Task state transitions
@@ -216,12 +228,28 @@ class TestAgentMemory:
         mem.store_semantic("k", "semantic_val")
         assert mem.retrieve("k", "auto") == "episodic_val"
 
+    def test_store_and_retrieve_update_access_timestamps(self):
+        mem = AgentMemory(agent_id="a1")
+        first_access = mem.last_accessed
+
+        mem.store_semantic("fact", "value")
+        assert mem.last_accessed >= first_access
+        stored_access = mem.semantic_memory["fact"]["last_accessed"]
+
+        mem.retrieve("fact", "semantic")
+        assert mem.last_accessed >= stored_access
+        assert mem.semantic_memory["fact"]["last_accessed"] >= stored_access
+
 
 # ---------------------------------------------------------------------------
 # BaseAgent / ExecutorAgent
 # ---------------------------------------------------------------------------
 
 class TestBaseAgent:
+    def test_empty_agent_name_raises(self):
+        with pytest.raises(ValueError, match="Agent name must be a non-empty string"):
+            ExecutorAgent("   ")
+
     def test_register_capability(self, executor):
         cap = AgentCapability(name="run", description="run stuff")
         assert executor.register_capability(cap) is True
@@ -574,6 +602,21 @@ class TestAgentSystem:
         assert system.system_metrics["successful_tasks"] == 1
         assert t in system.completed_tasks
 
+    def test_execute_task_completed_list_deduplicated(self, system):
+        agent = ExecutorAgent("exec")
+        system.add_agent(agent)
+        t = system.create_task("run-once", {})
+        system.submit_task(t, agent.id)
+        system.execute_task(t.id, agent.id)
+
+        with pytest.raises(
+            RuntimeError,
+            match="Refused forced status transition",
+        ):
+            system.execute_task(t.id, agent.id)
+
+        assert sum(1 for task in system.completed_tasks if task.id == t.id) == 1
+
     def test_execute_task_failure_updates_metrics(self, system):
         class BoomAgent(ExecutorAgent):
             def act(self, decision):
@@ -741,6 +784,22 @@ class TestAgentSystemObservabilityHooks:
         assert payload["task_id"] == t.id
         assert payload["system_id"] == system.id
         assert payload["event"] == "task_created"
+
+    def test_persistence_hook_failures_do_not_crash_core_flow(self, system):
+        def bad_persistence(_event, _task):
+            raise RuntimeError("hook-failure")
+
+        system.set_persistence_hook(bad_persistence)
+        t = system.create_task("safe-create", {})
+        assert t.id in system.task_registry
+
+    def test_telemetry_hook_failures_do_not_crash_core_flow(self, system):
+        def bad_telemetry(_event, _payload):
+            raise RuntimeError("hook-failure")
+
+        system.set_telemetry_hook(bad_telemetry)
+        t = system.create_task("safe-telemetry", {})
+        assert t.id in system.task_registry
 
 
 # ---------------------------------------------------------------------------
