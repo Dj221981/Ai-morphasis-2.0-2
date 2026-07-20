@@ -48,7 +48,7 @@ from .specialized import (
 )
 
 # System orchestration
-from .system import AgentSystem, AgentFactory, example_usage
+from .system import AgentSystem, AgentFactory
 
 # Persistence layer
 from .persistence import (
@@ -98,7 +98,6 @@ __all__ = [
     # System
     "AgentSystem",
     "AgentFactory",
-    "example_usage",
     # Persistence
     "TaskRepository",
     "InMemoryTaskRepository",

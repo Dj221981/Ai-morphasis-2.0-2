@@ -8,7 +8,6 @@ Contains:
   with new features: cancel_task, is_task_ready, dependency validation,
   dispatch_pending_tasks, process_retry_queue, run_once
 - AgentFactory — factory for creating agents with standard configurations
-- example_usage — demonstration function
 """
 
 import uuid
@@ -608,58 +607,3 @@ class AgentFactory:
 
         logger.info(f"Agent team created with config: {team_config}")
         return system
-
-
-# ============================================================================
-# Example Usage
-# ============================================================================
-
-def example_usage():
-    """Demonstrate the super agentic agents framework."""
-    # Create agent system
-    system = AgentSystem("Ai-morphasis-2.0")
-
-    # Create and add agents
-    executor = ExecutorAgent("TaskExecutor-1")
-    analyzer = AnalyzerAgent("DataAnalyzer-1")
-    learner = LearnerAgent("SystemLearner-1")
-
-    system.add_agent(executor)
-    system.add_agent(analyzer)
-    system.add_agent(learner)
-
-    # Register capabilities
-    from .models import AgentCapability
-    executor.register_capability(
-        AgentCapability(
-            name="file_processing",
-            description="Process and manipulate files",
-            confidence_score=0.95
-        )
-    )
-
-    analyzer.register_capability(
-        AgentCapability(
-            name="data_analysis",
-            description="Analyze data and generate insights",
-            confidence_score=0.88
-        )
-    )
-
-    # Create and submit tasks
-    task1 = system.create_task(
-        description="Analyze performance metrics",
-        parameters={"metric_type": "performance", "duration": "24h"}
-    )
-
-    if system.submit_task(task1, executor.id):
-        try:
-            system.execute_task(task1.id, executor.id)
-        except Exception as exc:
-            logger.error(f"Task execution failed in example: {exc}")
-
-    # Print system status
-    print("\n" + "="*60)
-    print("AGENT SYSTEM STATUS")
-    print("="*60)
-    print(system.to_json())
