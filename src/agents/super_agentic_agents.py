@@ -20,13 +20,15 @@ import logging
 import threading
 import random
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Callable, Set
+from typing import Any, Dict, List, Optional, Callable, Set, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 import json
 
 logger = logging.getLogger(__name__)
+CAPABILITY_MATCH_BASE_SCORE = 2.0
+DEFAULT_AGENT_BASE_SCORE = 1.0
 
 
 # ============================================================================
@@ -500,7 +502,7 @@ class BaseAgent(ABC):
         base_delay = float(metadata.get("retry_backoff_base_seconds", 1.0))
         max_delay = float(metadata.get("retry_backoff_max_seconds", 30.0))
         jitter_max = float(metadata.get("retry_jitter_seconds", 0.5))
-        retry_index = max(task.retry_count - 1, 0)
+        retry_index = min(max(task.retry_count, 0), 16)
         backoff = min(base_delay * (2 ** retry_index), max_delay)
         jitter = random.uniform(0.0, max(jitter_max, 0.0))
         return datetime.now() + timedelta(seconds=backoff + jitter)
@@ -629,25 +631,27 @@ class OrchestratorAgent(BaseAgent):
         if required_capabilities is None:
             required_capabilities = task.parameters.get("required_capabilities", [])
 
-        required = {
-            cap.strip() for cap in required_capabilities
-            if isinstance(cap, str) and cap.strip()
-        }
+        required: Set[str] = set()
+        for cap in required_capabilities:
+            if isinstance(cap, str):
+                normalized = cap.strip()
+                if normalized:
+                    required.add(normalized)
 
-        scored_agents: List[tuple[float, BaseAgent]] = []
+        scored_agents: List[Tuple[float, BaseAgent]] = []
         for agent in available_agents:
             agent_caps = set(agent.list_capabilities())
             if required and not required.issubset(agent_caps):
                 continue
-            capability_score = 1.0 if not required else len(required & agent_caps) / len(required)
             load_ratio = len(agent.active_tasks) / max(agent.max_active_tasks, 1)
-            score = (capability_score * 2.0) - load_ratio
+            base_score = CAPABILITY_MATCH_BASE_SCORE if required else DEFAULT_AGENT_BASE_SCORE
+            score = base_score - load_ratio
             scored_agents.append((score, agent))
 
         if not scored_agents:
             return None
 
-        scored_agents.sort(key=lambda item: (item[0], -len(item[1].active_tasks)), reverse=True)
+        scored_agents.sort(key=lambda item: item[0], reverse=True)
         return scored_agents[0][1]
 
     def get_system_status(self) -> Dict[str, Any]:
@@ -878,25 +882,31 @@ class AgentSystem:
             raise TypeError("Task metadata must be a dictionary")
 
         timeout_seconds = parameters.get("timeout_seconds")
-        if timeout_seconds is not None and float(timeout_seconds) <= 0:
-            raise ValueError("Task timeout_seconds must be greater than 0 when provided")
+        if timeout_seconds is not None:
+            try:
+                timeout_seconds = float(timeout_seconds)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Task timeout_seconds must be a positive number") from exc
+            if timeout_seconds <= 0:
+                raise ValueError("Task timeout_seconds must be greater than 0 when provided")
 
         required_capabilities = parameters.get("required_capabilities")
         if required_capabilities is not None and (
             not isinstance(required_capabilities, list)
+            or len(required_capabilities) == 0
             or any(not isinstance(cap, str) or not cap.strip() for cap in required_capabilities)
         ):
-            raise ValueError("Task required_capabilities must be a non-empty string list")
+            raise ValueError("Task required_capabilities must be a list of non-empty strings")
 
         task = Task(
             description=description,
             parameters=parameters,
             priority=priority,
             max_retries=max_retries,
-            metadata=dict(metadata) if isinstance(metadata, dict) else {},
+            metadata=dict(metadata) if metadata else {},
         )
         if timeout_seconds is not None:
-            task.metadata["timeout_seconds"] = float(timeout_seconds)
+            task.metadata["timeout_seconds"] = timeout_seconds
         if required_capabilities is not None:
             task.metadata["required_capabilities"] = [cap.strip() for cap in required_capabilities]
         with self._lock:
@@ -993,7 +1003,7 @@ class AgentSystem:
         self.system_metrics["avg_task_duration"] = ((current_avg * (completed - 1)) + duration) / completed
 
     def _is_retry_due(self, task: Task) -> bool:
-        """Return True when retry schedule is due or unscheduled."""
+        """Return True when retry is due; unscheduled retries are treated as immediately due."""
         return task.next_retry_at is None or datetime.now() >= task.next_retry_at
 
     def set_persistence_hook(self, hook: Optional[Callable[[str, Task], None]]) -> None:

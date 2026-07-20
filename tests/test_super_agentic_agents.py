@@ -22,6 +22,7 @@ Covers:
 """
 
 import pytest
+import time
 from unittest.mock import patch
 from datetime import datetime, timedelta
 
@@ -60,6 +61,10 @@ def executor():
 @pytest.fixture
 def system():
     return AgentSystem("test-system")
+
+
+def _always_cancel(_task):
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -541,8 +546,12 @@ class TestAgentSystem:
             system.create_task("bad-retries", {}, max_retries=-1)
 
     def test_create_task_invalid_required_capabilities_raises(self, system):
-        with pytest.raises(ValueError, match="required_capabilities"):
+        with pytest.raises(ValueError, match="required_capabilities must be a list of non-empty strings"):
             system.create_task("bad-caps", {"required_capabilities": ["", 1]})
+
+    def test_create_task_empty_required_capabilities_raises(self, system):
+        with pytest.raises(ValueError, match="required_capabilities must be a list of non-empty strings"):
+            system.create_task("bad-caps-empty", {"required_capabilities": []})
 
     def test_create_task_invalid_timeout_raises(self, system):
         with pytest.raises(ValueError, match="timeout_seconds"):
@@ -654,8 +663,9 @@ class TestAgentSystem:
         system.add_agent(agent)
         t = system.create_task(
             "cancel-me",
-            {"metadata": {"cancellation_check": lambda task: True}},
+            {"metadata": {"cancellation_check": _always_cancel}},
         )
+        assert callable(t.metadata["cancellation_check"])
         t.max_retries = 3
         system.submit_task(t, agent.id)
 
@@ -672,13 +682,14 @@ class TestAgentSystem:
                 return input_data
 
             def act(self, decision):
+                time.sleep(0.02)
                 return {"ok": True}
 
         agent = SlowAgent("slow")
         system.add_agent(agent)
         t = system.create_task(
             "timeout",
-            {"timeout_seconds": 1e-9, "metadata": {"retry_jitter_seconds": 0}},
+            {"timeout_seconds": 0.01, "metadata": {"retry_jitter_seconds": 0}},
         )
         t.max_retries = 1
         system.submit_task(t, agent.id)
