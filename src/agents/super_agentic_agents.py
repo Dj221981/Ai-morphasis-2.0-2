@@ -104,6 +104,10 @@ class AgentCapability:
     def __post_init__(self) -> None:
         if not self.name or not self.name.strip():
             raise ValueError("AgentCapability name must not be empty")
+        if not isinstance(self.description, str) or not self.description.strip():
+            raise ValueError("AgentCapability description must not be empty")
+        if not isinstance(self.version, str) or not self.version.strip():
+            raise ValueError("AgentCapability version must not be empty")
         if not (0.0 <= self.confidence_score <= 1.0):
             raise ValueError(
                 f"AgentCapability confidence_score must be in [0.0, 1.0]; got {self.confidence_score}"
@@ -124,33 +128,50 @@ class AgentMemory:
     last_accessed: datetime = field(default_factory=datetime.now)
     max_episodes: int = 1000
 
+    def _touch(self, timestamp: Optional[datetime] = None) -> datetime:
+        """Update and return last-access timestamp."""
+        now = timestamp or datetime.now()
+        self.last_accessed = now
+        return now
+
     def store_episode(self, key: str, value: Any) -> None:
         """Store an episode in short-term memory."""
-        if len(self.episodic_memory) >= self.max_episodes:
-            # Remove oldest entry (simple FIFO)
-            oldest_key = next(iter(self.episodic_memory))
+        now = self._touch()
+        if key not in self.episodic_memory and len(self.episodic_memory) >= self.max_episodes:
+            # Remove oldest entry by explicit timestamp to make eviction deterministic.
+            oldest_key = min(
+                self.episodic_memory.items(),
+                key=lambda item: item[1].get("timestamp", datetime.min),
+            )[0]
             del self.episodic_memory[oldest_key]
         self.episodic_memory[key] = {
             "value": value,
-            "timestamp": datetime.now()
+            "timestamp": now,
+            "last_accessed": now,
         }
-        self.last_accessed = datetime.now()
 
     def store_semantic(self, key: str, value: Any) -> None:
         """Store knowledge in long-term memory."""
+        now = self._touch()
         self.semantic_memory[key] = {
             "value": value,
-            "timestamp": datetime.now(),
-            "access_count": 0
+            "timestamp": now,
+            "last_accessed": now,
+            "access_count": 0,
         }
 
     def retrieve(self, key: str, memory_type: str = "auto") -> Optional[Any]:
         """Retrieve from memory (auto-selects best source)."""
         if memory_type in ("auto", "episodic") and key in self.episodic_memory:
+            now = self._touch()
+            self.episodic_memory[key]["last_accessed"] = now
             return self.episodic_memory[key]["value"]
         if memory_type in ("auto", "semantic") and key in self.semantic_memory:
+            now = self._touch()
             self.semantic_memory[key]["access_count"] += 1
+            self.semantic_memory[key]["last_accessed"] = now
             return self.semantic_memory[key]["value"]
+        self._touch()
         return None
 
 
@@ -240,8 +261,10 @@ class BaseAgent(ABC):
         max_active_tasks: int = 10,
     ):
         """Initialize a base agent."""
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("Agent name must be a non-empty string")
         self.id = str(uuid.uuid4())
-        self.name = name
+        self.name = name.strip()
         self.role = role
         self.status = AgentStatus.IDLE
         self.created_at = datetime.now()
@@ -359,16 +382,17 @@ class BaseAgent(ABC):
             logger.info(f"Agent {self.name} executing task {task.id}")
             self._emit_telemetry("task_started", task, {"attempt": attempt})
 
-            self._raise_if_cancelled(task)
+            self._raise_if_stopped(task, start_time)
 
             # Think phase
+            self._raise_if_stopped(task, start_time)
             reasoning = self.think(task.parameters)
-            self._raise_if_timed_out(task, start_time)
-            self._raise_if_cancelled(task)
+            self._raise_if_stopped(task, start_time)
 
             # Act phase
+            self._raise_if_stopped(task, start_time)
             result = self.act(reasoning)
-            self._raise_if_timed_out(task, start_time)
+            self._raise_if_stopped(task, start_time)
 
             with self._lock:
                 if not task.transition_to(TaskStatus.COMPLETED):
@@ -494,7 +518,15 @@ class BaseAgent(ABC):
         }
         if payload:
             telemetry_payload.update(payload)
-        self.telemetry_hook(event, telemetry_payload)
+        try:
+            self.telemetry_hook(event, telemetry_payload)
+        except Exception:
+            logger.exception(
+                "Telemetry hook failed for agent event=%s task_id=%s agent_id=%s",
+                event,
+                task.id,
+                self.id,
+            )
 
     def _calculate_next_retry_at(self, task: Task) -> datetime:
         """Calculate retry schedule using bounded exponential backoff + jitter."""
@@ -522,8 +554,26 @@ class BaseAgent(ABC):
         if task.status == TaskStatus.CANCELLED or bool(task.metadata.get("cancel_requested")):
             raise TaskCancelledError(f"Task {task.id} was cancelled before completion")
         cancellation_check = task.metadata.get("cancellation_check")
-        if callable(cancellation_check) and cancellation_check(task):
-            raise TaskCancelledError(f"Task {task.id} cancellation hook requested stop")
+        if callable(cancellation_check):
+            try:
+                if cancellation_check(task):
+                    raise TaskCancelledError(
+                        f"Task {task.id} cancellation hook requested stop"
+                    )
+            except TaskCancelledError:
+                raise
+            except Exception:
+                logger.exception(
+                    "Cancellation check callable failed task_id=%s", task.id
+                )
+                raise RuntimeError(
+                    f"Task {task.id} cancellation check callable failed"
+                )
+
+    def _raise_if_stopped(self, task: Task, started_at: datetime) -> None:
+        """Run cooperative timeout/cancellation checks at execution boundaries."""
+        self._raise_if_timed_out(task, started_at)
+        self._raise_if_cancelled(task)
 
     def _update_metrics(self, task: Task, success: bool, started_at: Optional[datetime] = None) -> None:
         """Update performance metrics with rolling average duration."""
@@ -780,7 +830,9 @@ class AgentSystem:
         self.orchestrator = OrchestratorAgent(f"{name}-Orchestrator")
         self.agents: Dict[str, BaseAgent] = {self.orchestrator.id: self.orchestrator}
         self.global_task_queue: List[Task] = []
+        self._queued_task_ids: Set[str] = set()
         self.completed_tasks: List[Task] = []
+        self._completed_task_ids: Set[str] = set()
         self.task_registry: Dict[str, Task] = {}
 
         self.system_metrics = {
@@ -872,16 +924,19 @@ class AgentSystem:
             raise ValueError("Task description must not be empty")
         if not isinstance(parameters, dict):
             raise TypeError("Task parameters must be a dictionary")
+        description = description.strip()
+        task_parameters = dict(parameters)
         if not isinstance(priority, TaskPriority):
             raise TypeError("Task priority must be a TaskPriority enum value")
         if not isinstance(max_retries, int) or max_retries < 0:
             raise ValueError("Task max_retries must be a non-negative integer")
 
-        metadata = parameters.get("metadata", {})
+        metadata = task_parameters.get("metadata", {})
         if metadata is not None and not isinstance(metadata, dict):
             raise TypeError("Task metadata must be a dictionary")
+        task_metadata = dict(metadata) if metadata else {}
 
-        timeout_seconds = parameters.get("timeout_seconds")
+        timeout_seconds = task_parameters.get("timeout_seconds")
         if timeout_seconds is not None:
             try:
                 timeout_seconds = float(timeout_seconds)
@@ -890,7 +945,7 @@ class AgentSystem:
             if timeout_seconds <= 0:
                 raise ValueError("Task timeout_seconds must be greater than 0 when provided")
 
-        required_capabilities = parameters.get("required_capabilities")
+        required_capabilities = task_parameters.get("required_capabilities")
         if required_capabilities is not None and (
             not isinstance(required_capabilities, list)
             or len(required_capabilities) == 0
@@ -900,17 +955,17 @@ class AgentSystem:
 
         task = Task(
             description=description,
-            parameters=parameters,
+            parameters=task_parameters,
             priority=priority,
             max_retries=max_retries,
-            metadata=dict(metadata) if metadata else {},
+            metadata=task_metadata,
         )
         if timeout_seconds is not None:
             task.metadata["timeout_seconds"] = timeout_seconds
         if required_capabilities is not None:
             task.metadata["required_capabilities"] = [cap.strip() for cap in required_capabilities]
         with self._lock:
-            self.global_task_queue.append(task)
+            self._queue_task_if_absent(task)
             self.task_registry[task.id] = task
             self.system_metrics["total_tasks"] += 1
             self._persist_task("created", task)
@@ -960,11 +1015,18 @@ class AgentSystem:
             raise ValueError(f"Task {task_id} not found")
 
         start_time = datetime.now()
+        logger.info(
+            "System executing task task_id=%s agent_id=%s status=%s retry_count=%s",
+            task.id,
+            agent.id,
+            task.status.value,
+            task.retry_count,
+        )
         try:
             result = agent.execute_task(task)
             with self._lock:
                 if task.status == TaskStatus.COMPLETED:
-                    self.completed_tasks.append(task)
+                    self._add_completed_task(task)
                     self.system_metrics["successful_tasks"] += 1
                 self._update_system_task_duration(task, start_time)
                 self._persist_task("completed", task)
@@ -973,8 +1035,7 @@ class AgentSystem:
             with self._lock:
                 if task.status == TaskStatus.RETRYING:
                     # Requeue for retry dispatch, guarding against duplicates
-                    if not any(t.id == task.id for t in self.global_task_queue):
-                        self.global_task_queue.append(task)
+                    self._queue_task_if_absent(task)
                     self._persist_task("retry_scheduled", task)
                 elif task.status == TaskStatus.CANCELLED:
                     self._persist_task("cancelled", task)
@@ -988,6 +1049,25 @@ class AgentSystem:
         """Remove task from global queue if present."""
         with self._lock:
             self.global_task_queue = [t for t in self.global_task_queue if t.id != task_id]
+            self._queued_task_ids.discard(task_id)
+
+    def _queue_task_if_absent(self, task: Task) -> None:
+        """Queue a task once, guarding against duplicate entries."""
+        if task.id in self._queued_task_ids:
+            logger.debug("Skipped duplicate queue entry for task_id=%s", task.id)
+            return
+        self.global_task_queue.append(task)
+        self._queued_task_ids.add(task.id)
+        logger.info("Task queued task_id=%s status=%s", task.id, task.status.value)
+
+    def _add_completed_task(self, task: Task) -> None:
+        """Track a completed task once, guarding against duplicate aggregation."""
+        if task.id in self._completed_task_ids:
+            logger.debug("Skipped duplicate completed task aggregation for task_id=%s", task.id)
+            return
+        self.completed_tasks.append(task)
+        self._completed_task_ids.add(task.id)
+        logger.info("Task marked completed in system task_id=%s", task.id)
 
     def _update_system_task_duration(self, task: Task, fallback_start: datetime) -> None:
         """Update system-level rolling average task duration (seconds)."""
@@ -1020,7 +1100,15 @@ class AgentSystem:
     def _persist_task(self, event: str, task: Task) -> None:
         """Invoke persistence extension hook, if configured."""
         if self.persistence_hook:
-            self.persistence_hook(event, task)
+            try:
+                self.persistence_hook(event, task)
+            except Exception:
+                logger.exception(
+                    "Persistence hook failed event=%s task_id=%s status=%s",
+                    event,
+                    task.id,
+                    task.status.value,
+                )
 
     def _emit_telemetry(self, event: str, payload: Dict[str, Any]) -> None:
         """Emit structured telemetry event for system-level observability."""
@@ -1033,7 +1121,14 @@ class AgentSystem:
             "timestamp": datetime.now().isoformat(),
         }
         event_payload.update(payload)
-        self.telemetry_hook(event, event_payload)
+        try:
+            self.telemetry_hook(event, event_payload)
+        except Exception:
+            logger.exception(
+                "System telemetry hook failed event=%s system_id=%s",
+                event,
+                self.id,
+            )
 
     def get_system_status(self) -> Dict[str, Any]:
         """Get comprehensive system status."""
