@@ -183,7 +183,10 @@ class TestValidationFunctions:
         with mock.patch.dict(sys.modules[shim.__name__].__dict__, {"TestSymbol": None}, clear=False):
             # Temporarily remove a symbol
             original_all = shim.__all__
-            shim.__all__ = original_all + ["NonExistentSymbol"]
+            if isinstance(original_all, tuple):
+                shim.__all__ = original_all + ("NonExistentSymbol",)
+            else:
+                shim.__all__ = [*original_all, "NonExistentSymbol"]
 
             result = shim.validate_shim_integrity(raise_on_error=False)
             assert result is False
@@ -204,7 +207,10 @@ class TestValidationFunctions:
             mock_import.return_value = pkg_mock
 
             original_all = shim.__all__
-            shim.__all__ = original_all + ["NonExistentSymbol"]
+            if isinstance(original_all, tuple):
+                shim.__all__ = original_all + ("NonExistentSymbol",)
+            else:
+                shim.__all__ = [*original_all, "NonExistentSymbol"]
 
             result = shim.validate_shim_integrity(raise_on_error=False)
             assert result is False
@@ -249,7 +255,6 @@ class TestDeprecationWarning:
 
     def test_deprecation_warning_emitted_on_startup(self):
         """Verify DeprecationWarning is emitted when shim is initialized."""
-        shim._DEPRECATION_WARNED = False
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             shim._emit_deprecation_warning()
@@ -261,7 +266,6 @@ class TestDeprecationWarning:
 
     def test_deprecation_warning_includes_migration_link(self):
         """Verify deprecation warning includes link to migration guide."""
-        shim._DEPRECATION_WARNED = False
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             shim._emit_deprecation_warning()

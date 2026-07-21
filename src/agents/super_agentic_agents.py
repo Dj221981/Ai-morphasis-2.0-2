@@ -101,14 +101,10 @@ except (ValueError, AttributeError):
 __version__ = "1.0.0"
 __deprecated_in__ = "2.0.0"
 __removal_in__ = "3.0.0"
-_DEPRECATION_WARNED = False
 
 
 def _emit_deprecation_warning() -> None:
     """Emit a deprecation warning with migration guidance."""
-    global _DEPRECATION_WARNED
-    if _DEPRECATION_WARNED:
-        return
     warnings.warn(
         (
             "src.agents.super_agentic_agents is deprecated and will be removed in v3.0.0. "
@@ -118,7 +114,6 @@ def _emit_deprecation_warning() -> None:
         DeprecationWarning,
         stacklevel=3,
     )
-    _DEPRECATION_WARNED = True
 
 
 # ============================================================================
@@ -126,6 +121,7 @@ def _emit_deprecation_warning() -> None:
 # ============================================================================
 
 _import_errors: Dict[str, Exception] = {}
+_IMPORT_COMPLETE = False
 _EXPECTED_SYMBOLS = (
     "AgentRole",
     "AgentStatus",
@@ -169,11 +165,8 @@ def _safe_import_from_package() -> bool:
     Returns True if successful, False if any symbol fails to import.
     Populates _import_errors dict with failed imports for diagnostic purposes.
     """
-    global _import_errors
+    global _import_errors, _IMPORT_COMPLETE
     _import_errors = {}
-
-    for symbol_name in _EXPECTED_SYMBOLS:
-        globals().pop(symbol_name, None)
 
     try:
         # Attempt to import the main package first
@@ -191,12 +184,18 @@ def _safe_import_from_package() -> bool:
                 logger.warning(f"Symbol '{symbol_name}' not found in src.agents: {exc}")
 
         if _import_errors:
+            atomic_failure = ImportError(
+                "Not exported because compatibility shim import failed atomically."
+            )
+            for symbol_name in _EXPECTED_SYMBOLS:
+                _import_errors.setdefault(symbol_name, atomic_failure)
             logger.warning(
                 f"Failed to import {len(_import_errors)} symbols: {list(_import_errors.keys())}"
             )
             return False
 
         globals().update(imported)
+        _IMPORT_COMPLETE = True
         logger.info("All expected symbols imported successfully from src.agents")
         return True
 
@@ -413,9 +412,13 @@ def _startup() -> None:
     Attempts safe import, validates on demand, handles fallback gracefully.
     Behavior controlled by environment variables:
     - AGENT_SHIM_STRICT_MODE: hard-fail vs. graceful degradation
-    - AGENT_SHIM_VALIDATE_AT_IMPORT: enable/disable startup validation
+    - AGENT_SHIM_VALIDATE_AT_IMPORT: opt-in startup validation in non-strict mode
     - AGENT_SHIM_LOG_LEVEL: set logging verbosity
+
+    Note: strict mode always performs integrity validation.
     """
+    # Re-read env flags each startup call so tests and runtime reload scenarios
+    # can opt into strict/validation behavior without requiring module reload.
     strict_mode = _env_flag("AGENT_SHIM_STRICT_MODE", "false")
     validate_at_import = _env_flag("AGENT_SHIM_VALIDATE_AT_IMPORT", "false")
 
@@ -468,7 +471,7 @@ _startup()
 
 def __getattr__(name: str):
     """Provide clearer diagnostics for missing shim exports."""
-    if name in __all__ and _import_errors:
+    if name in _import_errors and not _IMPORT_COMPLETE:
         failed = ", ".join(sorted(_import_errors.keys()))
         raise AttributeError(
             f"Shim export '{name}' is unavailable because compatibility import did not fully "

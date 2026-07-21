@@ -151,7 +151,7 @@ def test_validate_shim_integrity_runs_without_error():
 
 
 def test_validate_all_modules_raises_on_missing_submodule(monkeypatch):
-    """validate_all_modules() reports failed modules without raising."""
+    """validate_all_modules() returns False status entries instead of raising."""
 
     # Remove the target sub-module from the cache so importlib will attempt a
     # fresh import, then replace it with None (which forces ImportError).
@@ -249,8 +249,9 @@ def test_non_strict_import_degrades_without_partial_exports(monkeypatch):
     with mock.patch("importlib.import_module", side_effect=_patched_import):
         mod = importlib.import_module(shim_name)
 
-    assert "AgentSystem" in mod.get_import_errors()
-    assert not hasattr(mod, "Task")
+    assert mod.__all__ == EXPECTED_EXPORTS
+    assert set(mod.get_import_errors().keys()) == set(EXPECTED_EXPORTS)
+    assert all(not hasattr(mod, name) for name in EXPECTED_EXPORTS)
 
 
 def test_validate_all_modules_not_in___all__():
