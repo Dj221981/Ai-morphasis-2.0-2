@@ -34,18 +34,17 @@ For new code, prefer importing from the package directly::
 
 PRODUCTION DEPLOYMENT NOTES
 ----------------------------
-By default, startup validation is DISABLED to reduce import-time side effects
-in production while still allowing graceful degradation. Use these environment
-variables to control behavior:
+By default, strict validation is ENABLED to fail fast on any import or
+configuration errors in production. Use environment variables to customize:
 
-- AGENT_SHIM_STRICT_MODE=true         → Hard-fail on any import error
-- AGENT_SHIM_VALIDATE_AT_IMPORT=false → Skip integrity validation on startup
-- AGENT_SHIM_LOG_LEVEL=DEBUG          → Enable detailed import diagnostics
+- AGENT_SHIM_STRICT_MODE=false         → Graceful degradation (opt-in)
+- AGENT_SHIM_VALIDATE_AT_IMPORT=false  → Skip integrity validation (opt-in)
+- AGENT_SHIM_LOG_LEVEL=DEBUG           → Enable detailed import diagnostics
 
-Example production settings::
+Example production settings (defaults shown)::
 
-    export AGENT_SHIM_STRICT_MODE=false        # Graceful degradation
-    export AGENT_SHIM_VALIDATE_AT_IMPORT=true  # Opt-in startup validation
+    export AGENT_SHIM_STRICT_MODE=true         # ✓ Fail-fast enabled
+    export AGENT_SHIM_VALIDATE_AT_IMPORT=true  # ✓ Validation enabled
     export AGENT_SHIM_LOG_LEVEL=INFO           # Standard logging
 
 SECURITY REVIEW
@@ -68,19 +67,33 @@ import sys
 import logging
 import importlib
 import warnings
-from typing import Dict
+from typing import Dict, List
 
 # ============================================================================
 # Configuration: control shim behavior via environment variables
 # ============================================================================
 
-def _env_flag(name: str, default: str = "false") -> bool:
-    """Parse an environment boolean flag."""
+def _env_flag(name: str, default: str = "true") -> bool:
+    """Parse an environment boolean flag.
+    
+    Parameters
+    ----------
+    name : str
+        Environment variable name
+    default : str
+        Default value if not set ('true' or 'false'). Defaults to 'true'.
+    
+    Returns
+    -------
+    bool
+        Parsed boolean value
+    """
     return os.getenv(name, default).lower() in ("true", "1", "yes")
 
 
-_STRICT_MODE = _env_flag("AGENT_SHIM_STRICT_MODE", "false")
-_VALIDATE_AT_IMPORT = _env_flag("AGENT_SHIM_VALIDATE_AT_IMPORT", "false")
+# Production defaults: fail-fast, validate early, standard logging
+_STRICT_MODE = _env_flag("AGENT_SHIM_STRICT_MODE", "true")
+_VALIDATE_AT_IMPORT = _env_flag("AGENT_SHIM_VALIDATE_AT_IMPORT", "true")
 _LOG_LEVEL = os.getenv("AGENT_SHIM_LOG_LEVEL", "INFO").upper()
 
 # ============================================================================
@@ -122,41 +135,37 @@ def _emit_deprecation_warning() -> None:
 
 _import_errors: Dict[str, Exception] = {}
 _IMPORT_COMPLETE = False
-_EXPECTED_SYMBOLS = (
-    "AgentRole",
-    "AgentStatus",
-    "TaskPriority",
-    "TaskStatus",
-    "TASK_STATUS_TRANSITIONS",
-    "TaskCancelledError",
-    "RetryPolicy",
-    "ExecutionPolicy",
-    "AgentCapability",
-    "AgentMemory",
-    "Task",
-    "CAPABILITY_MATCH_BASE_SCORE",
-    "DEFAULT_AGENT_BASE_SCORE",
-    "BaseAgent",
-    "OrchestratorAgent",
-    "ExecutorAgent",
-    "AnalyzerAgent",
-    "LearnerAgent",
-    "AgentSystem",
-    "AgentFactory",
-    "TaskRepository",
-    "InMemoryTaskRepository",
-    "SqlTaskRepository",
-    "RedisTaskRepository",
-    "TaskEventType",
-    "TaskEvent",
-    "InMemoryEventStore",
-    "SqlEventStore",
-    "RedisEventStore",
-    "dispatch_pending_tasks",
-    "process_retry_queue",
-    "run_once",
-    "run_forever",
-)
+_DYNAMIC_SYMBOLS: List[str] = []  # Will be populated from src.agents.__all__
+
+
+def _get_expected_symbols() -> List[str]:
+    """Dynamically discover expected symbols from src.agents.__all__.
+    
+    This avoids hardcoding symbol lists and allows the shim to adapt as
+    the package evolves without requiring manual updates.
+    
+    Returns
+    -------
+    list[str]
+        List of public symbol names from src.agents
+    
+    Raises
+    ------
+    ImportError
+        If src.agents cannot be imported or has no __all__
+    """
+    try:
+        pkg = importlib.import_module("src.agents")
+        if not hasattr(pkg, "__all__"):
+            raise ImportError("src.agents has no __all__ export list")
+        symbols = list(pkg.__all__)
+        logger.debug(f"Discovered {len(symbols)} expected symbols from src.agents.__all__")
+        return symbols
+    except ImportError as exc:
+        raise ImportError(
+            f"Cannot discover symbols from src.agents: {exc}. "
+            "Ensure src.agents package is properly installed."
+        ) from exc
 
 
 def _safe_import_from_package() -> bool:
@@ -164,18 +173,26 @@ def _safe_import_from_package() -> bool:
 
     Returns True if successful, False if any symbol fails to import.
     Populates _import_errors dict with failed imports for diagnostic purposes.
+    
+    Returns
+    -------
+    bool
+        True if all symbols imported successfully, False otherwise
     """
-    global _import_errors, _IMPORT_COMPLETE
+    global _import_errors, _IMPORT_COMPLETE, _DYNAMIC_SYMBOLS
     _import_errors = {}
 
     try:
-        # Attempt to import the main package first
+        # Discover expected symbols dynamically
+        _DYNAMIC_SYMBOLS = _get_expected_symbols()
+        
+        # Attempt to import the main package
         pkg = importlib.import_module("src.agents")
-        logger.info("src.agents package imported successfully")
+        logger.info(f"src.agents package imported successfully")
         imported = {}
 
         # Try to get each symbol
-        for symbol_name in _EXPECTED_SYMBOLS:
+        for symbol_name in _DYNAMIC_SYMBOLS:
             try:
                 imported[symbol_name] = getattr(pkg, symbol_name)
                 logger.debug(f"Imported symbol: {symbol_name}")
@@ -187,7 +204,7 @@ def _safe_import_from_package() -> bool:
             atomic_failure = ImportError(
                 "Not exported because compatibility shim import failed atomically."
             )
-            for symbol_name in _EXPECTED_SYMBOLS:
+            for symbol_name in _DYNAMIC_SYMBOLS:
                 _import_errors.setdefault(symbol_name, atomic_failure)
             logger.warning(
                 f"Failed to import {len(_import_errors)} symbols: {list(_import_errors.keys())}"
@@ -196,7 +213,7 @@ def _safe_import_from_package() -> bool:
 
         globals().update(imported)
         _IMPORT_COMPLETE = True
-        logger.info("All expected symbols imported successfully from src.agents")
+        logger.info(f"All {len(_DYNAMIC_SYMBOLS)} expected symbols imported successfully from src.agents")
         return True
 
     except ImportError as exc:
@@ -213,41 +230,8 @@ def _safe_import_from_package() -> bool:
 # Public API
 # ============================================================================
 
-__all__ = [
-    "AgentRole",
-    "AgentStatus",
-    "TaskPriority",
-    "TaskStatus",
-    "TASK_STATUS_TRANSITIONS",
-    "TaskCancelledError",
-    "RetryPolicy",
-    "ExecutionPolicy",
-    "AgentCapability",
-    "AgentMemory",
-    "Task",
-    "CAPABILITY_MATCH_BASE_SCORE",
-    "DEFAULT_AGENT_BASE_SCORE",
-    "BaseAgent",
-    "OrchestratorAgent",
-    "ExecutorAgent",
-    "AnalyzerAgent",
-    "LearnerAgent",
-    "AgentSystem",
-    "AgentFactory",
-    "TaskRepository",
-    "InMemoryTaskRepository",
-    "SqlTaskRepository",
-    "RedisTaskRepository",
-    "TaskEventType",
-    "TaskEvent",
-    "InMemoryEventStore",
-    "SqlEventStore",
-    "RedisEventStore",
-    "dispatch_pending_tasks",
-    "process_retry_queue",
-    "run_once",
-    "run_forever",
-]
+# __all__ will be built dynamically at startup
+__all__: List[str] = []
 
 
 # ============================================================================
@@ -397,9 +381,9 @@ def is_shim_fully_functional() -> bool:
     Returns
     -------
     bool
-        True if no import errors are present, False otherwise.
+        True if no import errors are present and import completed, False otherwise.
     """
-    return len(_import_errors) == 0
+    return len(_import_errors) == 0 and _IMPORT_COMPLETE
 
 
 # ============================================================================
@@ -415,20 +399,26 @@ def _startup() -> None:
     - AGENT_SHIM_VALIDATE_AT_IMPORT: opt-in startup validation in non-strict mode
     - AGENT_SHIM_LOG_LEVEL: set logging verbosity
 
-    Note: strict mode always performs integrity validation.
+    In production (default), strict mode is ON and validation is ON.
+    Both fail fast to prevent silent failures.
     """
+    global __all__
+    
     # Re-read env flags each startup call so tests and runtime reload scenarios
-    # can opt into strict/validation behavior without requiring module reload.
-    strict_mode = _env_flag("AGENT_SHIM_STRICT_MODE", "false")
-    validate_at_import = _env_flag("AGENT_SHIM_VALIDATE_AT_IMPORT", "false")
+    # can opt into different behavior without requiring module reload.
+    strict_mode = _env_flag("AGENT_SHIM_STRICT_MODE", "true")
+    validate_at_import = _env_flag("AGENT_SHIM_VALIDATE_AT_IMPORT", "true")
 
     logger.info(
         f"Initializing src.agents.super_agentic_agents "
-        f"(version={__version__}, strict_mode={strict_mode})"
+        f"(version={__version__}, strict_mode={strict_mode}, validate_at_import={validate_at_import})"
     )
 
     # Step 1: Try safe import
     success = _safe_import_from_package()
+    
+    # Build __all__ from dynamically discovered symbols
+    __all__ = list(_DYNAMIC_SYMBOLS)
 
     if not success:
         logger.error("Failed to import one or more symbols from src.agents")
@@ -440,18 +430,19 @@ def _startup() -> None:
                 for name, exc in _import_errors.items()
             )
             raise ImportError(
-                f"super_agentic_agents (strict mode): failed to import from src.agents. "
-                f"Errors: {errors_summary}"
+                f"super_agentic_agents (strict_mode=true): failed to import from src.agents. "
+                f"Errors: {errors_summary}. "
+                f"To enable graceful degradation, set AGENT_SHIM_STRICT_MODE=false"
             )
         else:
-            # Graceful degradation in production mode
+            # Graceful degradation in non-strict mode
             logger.warning(
                 "Graceful degradation: shim partially loaded. "
-                "Use AGENT_SHIM_STRICT_MODE=true to fail fast instead."
+                "Use AGENT_SHIM_STRICT_MODE=true (production default) to fail fast instead."
             )
 
-    # Step 2: Optionally validate integrity at import
-    if strict_mode or validate_at_import:
+    # Step 2: Validate integrity at import (enabled by default in production)
+    if validate_at_import:
         try:
             validate_shim_integrity(raise_on_error=strict_mode)
         except (AssertionError, ImportError) as exc:
@@ -476,6 +467,6 @@ def __getattr__(name: str):
         raise AttributeError(
             f"Shim export '{name}' is unavailable because compatibility import did not fully "
             f"initialize. Missing/failed symbols: {failed}. "
-            f"Use get_import_errors() for details or set AGENT_SHIM_STRICT_MODE=true."
+            f"Use get_import_errors() for details or set AGENT_SHIM_STRICT_MODE=true (production)."
         )
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
