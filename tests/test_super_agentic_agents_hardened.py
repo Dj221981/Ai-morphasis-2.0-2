@@ -183,7 +183,10 @@ class TestValidationFunctions:
         with mock.patch.dict(sys.modules[shim.__name__].__dict__, {"TestSymbol": None}, clear=False):
             # Temporarily remove a symbol
             original_all = shim.__all__
-            shim.__all__ = original_all + ("NonExistentSymbol",)
+            if isinstance(original_all, tuple):
+                shim.__all__ = original_all + ("NonExistentSymbol",)
+            else:
+                shim.__all__ = [*original_all, "NonExistentSymbol"]
 
             result = shim.validate_shim_integrity(raise_on_error=False)
             assert result is False
@@ -204,7 +207,10 @@ class TestValidationFunctions:
             mock_import.return_value = pkg_mock
 
             original_all = shim.__all__
-            shim.__all__ = original_all + ("NonExistentSymbol",)
+            if isinstance(original_all, tuple):
+                shim.__all__ = original_all + ("NonExistentSymbol",)
+            else:
+                shim.__all__ = [*original_all, "NonExistentSymbol"]
 
             result = shim.validate_shim_integrity(raise_on_error=False)
             assert result is False
@@ -373,11 +379,16 @@ class TestLogging:
     def test_safe_import_logs_debug_messages(self, caplog):
         """Verify safe import logs at DEBUG level."""
         shim._import_errors.clear()
-        with caplog.at_level(logging.DEBUG):
-            shim._safe_import_from_package()
+        old_level = shim.logger.level
+        try:
+            shim.logger.setLevel(logging.DEBUG)
+            with caplog.at_level(logging.DEBUG):
+                shim._safe_import_from_package()
 
-            # Should have debug messages about imported symbols
-            assert any("Imported symbol" in record.message for record in caplog.records)
+                # Should have debug messages about imported symbols
+                assert any("Imported symbol" in record.message for record in caplog.records)
+        finally:
+            shim.logger.setLevel(old_level)
 
 
 # ============================================================================

@@ -151,9 +151,7 @@ def test_validate_shim_integrity_runs_without_error():
 
 
 def test_validate_all_modules_raises_on_missing_submodule(monkeypatch):
-    """validate_all_modules() must raise ImportError with a descriptive message
-    when a required sub-module cannot be imported."""
-    import importlib
+    """validate_all_modules() returns False status entries instead of raising."""
 
     # Remove the target sub-module from the cache so importlib will attempt a
     # fresh import, then replace it with None (which forces ImportError).
@@ -161,8 +159,8 @@ def test_validate_all_modules_raises_on_missing_submodule(monkeypatch):
     monkeypatch.delitem(sys.modules, target, raising=False)
     monkeypatch.setitem(sys.modules, target, None)
 
-    with pytest.raises(ImportError, match=target):
-        SHIM_MODULE.validate_all_modules()
+    status = SHIM_MODULE.validate_all_modules()
+    assert status[target] is False
 
 
 def test_validate_shim_integrity_raises_when_all_has_phantom_name():
@@ -172,7 +170,7 @@ def test_validate_shim_integrity_raises_when_all_has_phantom_name():
     try:
         SHIM_MODULE.__all__ = original_all + ["_NonExistentSymbol_"]
         with pytest.raises(AssertionError, match="_NonExistentSymbol_"):
-            SHIM_MODULE.validate_shim_integrity()
+            SHIM_MODULE.validate_shim_integrity(raise_on_error=True)
     finally:
         SHIM_MODULE.__all__ = original_all
 
@@ -197,6 +195,63 @@ def test_import_guard_error_message_is_informative(monkeypatch):
 
     with pytest.raises(ImportError, match="super_agentic_agents"):
         importlib.import_module(shim_name)
+
+
+def test_strict_mode_import_fails_on_missing_symbol(monkeypatch):
+    """Strict mode should hard-fail during import when exports are missing."""
+    import importlib
+    import types
+    from unittest import mock
+
+    shim_name = "src.agents.super_agentic_agents"
+    monkeypatch.setenv("AGENT_SHIM_STRICT_MODE", "true")
+    monkeypatch.delenv("AGENT_SHIM_VALIDATE_AT_IMPORT", raising=False)
+    monkeypatch.delitem(sys.modules, shim_name, raising=False)
+
+    broken_pkg = types.ModuleType("src.agents")
+    for name in EXPECTED_EXPORTS:
+        if name != "AgentSystem":
+            setattr(broken_pkg, name, object())
+    real_import = importlib.import_module
+
+    def _patched_import(name, *args, **kwargs):
+        if name == "src.agents":
+            return broken_pkg
+        return real_import(name, *args, **kwargs)
+
+    with mock.patch("importlib.import_module", side_effect=_patched_import):
+        with pytest.raises(ImportError, match="failed to import from src.agents"):
+            importlib.import_module(shim_name)
+
+
+def test_non_strict_import_degrades_without_partial_exports(monkeypatch):
+    """Non-strict import should succeed but avoid partial symbol loading."""
+    import importlib
+    import types
+    from unittest import mock
+
+    shim_name = "src.agents.super_agentic_agents"
+    monkeypatch.setenv("AGENT_SHIM_STRICT_MODE", "false")
+    monkeypatch.setenv("AGENT_SHIM_VALIDATE_AT_IMPORT", "false")
+    monkeypatch.delitem(sys.modules, shim_name, raising=False)
+
+    broken_pkg = types.ModuleType("src.agents")
+    for name in EXPECTED_EXPORTS:
+        if name != "AgentSystem":
+            setattr(broken_pkg, name, object())
+    real_import = importlib.import_module
+
+    def _patched_import(name, *args, **kwargs):
+        if name == "src.agents":
+            return broken_pkg
+        return real_import(name, *args, **kwargs)
+
+    with mock.patch("importlib.import_module", side_effect=_patched_import):
+        mod = importlib.import_module(shim_name)
+
+    assert mod.__all__ == EXPECTED_EXPORTS
+    assert set(mod.get_import_errors().keys()) == set(EXPECTED_EXPORTS)
+    assert all(not hasattr(mod, name) for name in EXPECTED_EXPORTS)
 
 
 def test_validate_all_modules_not_in___all__():
