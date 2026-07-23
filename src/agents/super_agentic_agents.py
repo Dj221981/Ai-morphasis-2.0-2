@@ -220,7 +220,6 @@ def _safe_import_from_package() -> bool:
     global _import_errors, _IMPORT_COMPLETE, _DYNAMIC_SYMBOLS
     _import_errors = {}
     _IMPORT_COMPLETE = False
-    _DYNAMIC_SYMBOLS = list(_FALLBACK_PUBLIC_SYMBOLS)
 
     try:
         # Attempt to import the main package
@@ -256,10 +255,12 @@ def _safe_import_from_package() -> bool:
         return True
 
     except ImportError as exc:
+        _DYNAMIC_SYMBOLS = list(_FALLBACK_PUBLIC_SYMBOLS)
         logger.error(f"Failed to import src.agents package: {exc}", exc_info=True)
         _import_errors["__package__"] = exc
         return False
     except Exception as exc:
+        _DYNAMIC_SYMBOLS = list(_FALLBACK_PUBLIC_SYMBOLS)
         logger.error(f"Unexpected error during import from src.agents: {exc}", exc_info=True)
         _import_errors["__unexpected__"] = exc
         return False
