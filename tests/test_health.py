@@ -18,6 +18,12 @@ def test_ready_endpoint() -> None:
     assert response.json() == {"status": "ok"}
 
 
+def test_health_ready_endpoint() -> None:
+    response = client.get("/health/ready")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
 def test_security_headers_are_set() -> None:
     response = client.get("/health")
     assert response.headers["x-content-type-options"] == "nosniff"

@@ -78,8 +78,6 @@ __all__ = [
     "TaskStatus",
     # Constants / tables
     "TASK_STATUS_TRANSITIONS",
-    "CAPABILITY_MATCH_BASE_SCORE",
-    "DEFAULT_AGENT_BASE_SCORE",
     # Errors
     "TaskCancelledError",
     # Policy types
@@ -89,6 +87,8 @@ __all__ = [
     "AgentCapability",
     "AgentMemory",
     "Task",
+    "CAPABILITY_MATCH_BASE_SCORE",
+    "DEFAULT_AGENT_BASE_SCORE",
     # Agent classes
     "BaseAgent",
     "OrchestratorAgent",
