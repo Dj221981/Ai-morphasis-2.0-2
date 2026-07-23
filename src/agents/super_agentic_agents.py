@@ -470,7 +470,7 @@ def _startup() -> None:
                 for name, exc in _import_errors.items()
             )
             raise ImportError(
-                f"super_agentic_agents (strict mode=true): failed to import from src.agents. "
+                f"super_agentic_agents (strict_mode=true): failed to import from src.agents. "
                 f"Errors: {errors_summary}. "
                 f"To enable graceful degradation, set AGENT_SHIM_STRICT_MODE=false"
             )
