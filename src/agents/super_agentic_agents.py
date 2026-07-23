@@ -136,6 +136,41 @@ def _emit_deprecation_warning() -> None:
 _import_errors: Dict[str, Exception] = {}
 _IMPORT_COMPLETE = False
 _DYNAMIC_SYMBOLS: List[str] = []  # Will be populated from src.agents.__all__
+_FALLBACK_PUBLIC_SYMBOLS: List[str] = [
+    "AgentRole",
+    "AgentStatus",
+    "TaskPriority",
+    "TaskStatus",
+    "TASK_STATUS_TRANSITIONS",
+    "TaskCancelledError",
+    "RetryPolicy",
+    "ExecutionPolicy",
+    "AgentCapability",
+    "AgentMemory",
+    "Task",
+    "CAPABILITY_MATCH_BASE_SCORE",
+    "DEFAULT_AGENT_BASE_SCORE",
+    "BaseAgent",
+    "OrchestratorAgent",
+    "ExecutorAgent",
+    "AnalyzerAgent",
+    "LearnerAgent",
+    "AgentSystem",
+    "AgentFactory",
+    "TaskRepository",
+    "InMemoryTaskRepository",
+    "SqlTaskRepository",
+    "RedisTaskRepository",
+    "TaskEventType",
+    "TaskEvent",
+    "InMemoryEventStore",
+    "SqlEventStore",
+    "RedisEventStore",
+    "dispatch_pending_tasks",
+    "process_retry_queue",
+    "run_once",
+    "run_forever",
+]
 
 
 def _get_expected_symbols() -> List[str]:
@@ -157,7 +192,10 @@ def _get_expected_symbols() -> List[str]:
     try:
         pkg = importlib.import_module("src.agents")
         if not hasattr(pkg, "__all__"):
-            raise ImportError("src.agents has no __all__ export list")
+            logger.warning(
+                "src.agents has no __all__ export list; using shim fallback public contract"
+            )
+            return list(_FALLBACK_PUBLIC_SYMBOLS)
         symbols = list(pkg.__all__)
         logger.debug(f"Discovered {len(symbols)} expected symbols from src.agents.__all__")
         return symbols
@@ -181,13 +219,14 @@ def _safe_import_from_package() -> bool:
     """
     global _import_errors, _IMPORT_COMPLETE, _DYNAMIC_SYMBOLS
     _import_errors = {}
+    _IMPORT_COMPLETE = False
+    _DYNAMIC_SYMBOLS = list(_FALLBACK_PUBLIC_SYMBOLS)
 
     try:
-        # Discover expected symbols dynamically
-        _DYNAMIC_SYMBOLS = _get_expected_symbols()
-        
         # Attempt to import the main package
         pkg = importlib.import_module("src.agents")
+        # Discover expected symbols dynamically when available
+        _DYNAMIC_SYMBOLS = _get_expected_symbols()
         logger.info(f"src.agents package imported successfully")
         imported = {}
 
@@ -430,7 +469,7 @@ def _startup() -> None:
                 for name, exc in _import_errors.items()
             )
             raise ImportError(
-                f"super_agentic_agents (strict_mode=true): failed to import from src.agents. "
+                f"super_agentic_agents (strict mode=true): failed to import from src.agents. "
                 f"Errors: {errors_summary}. "
                 f"To enable graceful degradation, set AGENT_SHIM_STRICT_MODE=false"
             )

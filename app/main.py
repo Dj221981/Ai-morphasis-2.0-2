@@ -50,5 +50,6 @@ def health() -> dict[str, str]:
 
 
 @app.get("/ready")
+@app.get("/health/ready")
 def ready() -> dict[str, str]:
     return {"status": "ok"}
