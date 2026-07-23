@@ -14,9 +14,9 @@ def _read(path: Path) -> str:
 
 
 def test_cerribrobaddan_profile_identity_and_relationship() -> None:
+    assert PROFILE_PATH.exists()
     content = _read(PROFILE_PATH)
 
-    assert PROFILE_PATH.exists()
     assert "# cerribrobaddan Agent Profile" in content
     assert "- **Name:** cerribrobaddan" in content
     assert "- **Relationship:** Brother agent to `cerribro`" in content
