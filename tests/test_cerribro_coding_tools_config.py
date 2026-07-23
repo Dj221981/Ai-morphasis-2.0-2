@@ -70,3 +70,37 @@ def test_coding_pipeline_guardrails_and_output_contract() -> None:
         "known_limitations_or_unknowns",
         "next_recommended_step",
     ]
+
+
+def test_cerribro_profile_version_and_base_profile_file() -> None:
+    config = load_cerribro_config()
+
+    assert config["profile_version"] == "2.1"
+    base_profile = REPO_ROOT / config["base_profile"]
+    assert base_profile.exists()
+    assert "`cerribro` and `cerribrobaddan`" in base_profile.read_text(encoding="utf-8")
+
+
+def test_coding_tool_categories_and_release_guardrails_are_configured() -> None:
+    coding_tools = load_cerribro_config()["coding_tools"]
+    tool_categories = coding_tools["tool_categories"]
+
+    assert set(tool_categories) == {
+        "discovery_search",
+        "read_inspect",
+        "edit_refactor",
+        "execution",
+        "quality",
+        "documentation_changelog",
+    }
+    assert tool_categories["discovery_search"]["required"] is True
+    assert tool_categories["read_inspect"]["required"] is True
+    assert tool_categories["edit_refactor"]["required"] is True
+    assert tool_categories["quality"]["required"] is True
+    assert tool_categories["execution"]["required"] is False
+    assert tool_categories["documentation_changelog"]["required"] is False
+
+    guardrails = coding_tools["guardrails"]
+    assert guardrails["require_dependency_vulnerability_check_on_new_packages"] is True
+    assert guardrails["require_secret_scan_before_commit"] is True
+    assert guardrails["require_ci_green_for_release"] is True
