@@ -1,11 +1,34 @@
 {
   "agent_name": "cerribro",
-  "profile_version": "2.1",
+  "profile_version": "2.2",
   "base_profile": "agents/cerribro/README.md",
   "deep_upgrade": {
     "strict_planning": false,
     "deep_research": false,
     "deepmind_loop": false
+  },
+  "ghost_modal": {
+    "enabled": true,
+    "doc_file": "agents/cerribro/ghost_modal.md",
+    "shared_with": [
+      "cerribro",
+      "cerribrobaddan"
+    ],
+    "default_mode": "normal",
+    "security_mode": "security",
+    "threat_threshold": 3,
+    "toolboxes": {
+      "normal": [
+        "summarize",
+        "plan",
+        "refactor_hint"
+      ],
+      "security": [
+        "threat_scan",
+        "ioc_extract",
+        "incident_note"
+      ]
+    }
   },
   "coding_tools": {
     "enabled": true,
