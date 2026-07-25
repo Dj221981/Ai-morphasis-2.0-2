@@ -127,5 +127,31 @@
       "known_limitations_or_unknowns",
       "next_recommended_step"
     ]
+  },
+  "helpers": {
+    "cerribro": [
+      {
+        "name": "threat-intel-scout",
+        "file": "agents/cerribro/helpers/threat-intel-scout.md",
+        "role": "Track emerging threats and map risk to environment"
+      },
+      {
+        "name": "incident-triage-analyst",
+        "file": "agents/cerribro/helpers/incident-triage-analyst.md",
+        "role": "Enrich and prioritize security alerts for response"
+      }
+    ],
+    "cerribrobadden": [
+      {
+        "name": "vulnerability-validation-agent",
+        "file": "agents/cerribrobadden/helpers/vulnerability-validation-agent.md",
+        "role": "Validate vulnerabilities and reduce false positives"
+      },
+      {
+        "name": "compliance-hardening-auditor",
+        "file": "agents/cerribrobadden/helpers/compliance-hardening-auditor.md",
+        "role": "Monitor control drift and hardening compliance"
+      }
+    ]
   }
 }
