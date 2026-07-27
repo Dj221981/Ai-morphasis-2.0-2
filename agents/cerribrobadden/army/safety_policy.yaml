@@ -1,0 +1,19 @@
+policy_name: "defensive-cyber-only"
+version: "1.0"
+
+hard_blocks:
+  - "No instructions for unauthorized system access"
+  - "No malware, ransomware, worm, or botnet creation"
+  - "No exploit chain building"
+  - "No privilege escalation instructions"
+  - "No social engineering scripts for malicious use"
+
+response_style:
+  - "Provide defensive mitigations only"
+  - "Prefer detection, containment, recovery guidance"
+  - "Escalate ambiguous intent to human analyst"
+
+compliance_tags:
+  - "NIST-CSF"
+  - "ISO-27001"
+  - "MITRE-ATT&CK (defensive mapping)"

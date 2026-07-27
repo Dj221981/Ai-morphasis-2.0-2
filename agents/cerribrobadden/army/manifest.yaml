@@ -1,0 +1,53 @@
+version: "1.0"
+army_name: "cerribrobadden-defense-validation-swarm"
+total_agents: 120
+mission: "Defensive cybersecurity operations, threat detection, triage, defense validation, and response recommendations."
+
+orchestrators:
+  - id: "cerribrobadden-orch-001"
+    role: "mission-planner"
+  - id: "cerribrobadden-orch-002"
+    role: "task-router"
+  - id: "cerribrobadden-orch-003"
+    role: "policy-guardrail"
+  - id: "cerribrobadden-orch-004"
+    role: "audit-logger"
+
+squads:
+  - name: "ingestion-squad"
+    count: 20
+    role: "Collect SIEM/EDR/Cloud/Identity telemetry"
+  - name: "detection-squad"
+    count: 30
+    role: "Map telemetry to ATT&CK and detect suspicious patterns"
+  - name: "intel-correlation-squad"
+    count: 15
+    role: "Correlate IOCs/TTPs with threat intelligence"
+  - name: "triage-squad"
+    count: 20
+    role: "Severity scoring, deduplication, false-positive reduction"
+  - name: "forensics-squad"
+    count: 15
+    role: "Timeline reconstruction and evidence packaging"
+  - name: "defense-validation-squad"
+    count: 10
+    role: "Purple-team simulation for defensive control validation only"
+  - name: "remediation-squad"
+    count: 10
+    role: "Generate containment/eradication recommendations (human approval required)"
+
+capabilities:
+  allowed:
+    - "threat_detection"
+    - "anomaly_scoring"
+    - "ioc_matching"
+    - "incident_triage"
+    - "forensic_timeline"
+    - "defensive_recommendations"
+    - "defense_control_validation"
+  disallowed:
+    - "unauthorized_access"
+    - "exploit_development"
+    - "payload_generation"
+    - "persistence_mechanisms"
+    - "credential_theft"

@@ -1,0 +1,8 @@
+playbook: "ransomware-response"
+steps:
+  - "Detect encryption-like behavior and abnormal file activity"
+  - "Isolate affected hosts (human approval)"
+  - "Block known C2 and malicious hashes"
+  - "Preserve forensic artifacts"
+  - "Recover from known-good backups"
+  - "Publish lessons learned and control improvements"

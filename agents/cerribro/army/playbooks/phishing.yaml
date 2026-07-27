@@ -1,0 +1,8 @@
+playbook: "phishing-response"
+steps:
+  - "Detect suspicious email indicators (spoofing, links, attachments)"
+  - "Correlate recipient reports and mailbox telemetry"
+  - "Quarantine suspected messages"
+  - "Reset potentially compromised credentials (with approval)"
+  - "Hunt for lateral movement indicators"
+  - "Issue user awareness and post-incident report"

@@ -1,0 +1,11 @@
+kpis:
+  - name: "MTTD"
+    target: "< 10 minutes"
+  - name: "MTTR"
+    target: "< 60 minutes for high severity"
+  - name: "False Positive Rate"
+    target: "< 8%"
+  - name: "Coverage ATT&CK Techniques"
+    target: "> 80% relevant techniques"
+  - name: "Control Validation Findings Closure"
+    target: "< 14 days"

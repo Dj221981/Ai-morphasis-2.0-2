@@ -1,0 +1,11 @@
+kpis:
+  - name: "MTTD"
+    target: "< 10 minutes"
+  - name: "MTTR"
+    target: "< 60 minutes for high severity"
+  - name: "False Positive Rate"
+    target: "< 8%"
+  - name: "Coverage ATT&CK Techniques"
+    target: "> 80% relevant techniques"
+  - name: "Analyst Approval Latency"
+    target: "< 5 minutes for containment actions"

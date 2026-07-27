@@ -1,0 +1,49 @@
+version: "1.0"
+army_name: "cerribro-defensive-swarm"
+total_agents: 120
+mission: "Defensive cybersecurity operations, threat detection, triage, and response recommendations."
+
+orchestrators:
+  - id: "cerribro-orch-001"
+    role: "mission-planner"
+  - id: "cerribro-orch-002"
+    role: "task-router"
+  - id: "cerribro-orch-003"
+    role: "policy-guardrail"
+  - id: "cerribro-orch-004"
+    role: "audit-logger"
+
+squads:
+  - name: "ingestion-squad"
+    count: 20
+    role: "Collect SIEM/EDR/Cloud/Identity telemetry"
+  - name: "detection-squad"
+    count: 30
+    role: "Map telemetry to ATT&CK and detect suspicious patterns"
+  - name: "intel-correlation-squad"
+    count: 15
+    role: "Correlate IOCs/TTPs with threat intelligence"
+  - name: "triage-squad"
+    count: 20
+    role: "Severity scoring, deduplication, false-positive reduction"
+  - name: "forensics-squad"
+    count: 15
+    role: "Timeline reconstruction and evidence packaging"
+  - name: "remediation-squad"
+    count: 16
+    role: "Generate containment/eradication recommendations (human approval required)"
+
+capabilities:
+  allowed:
+    - "threat_detection"
+    - "anomaly_scoring"
+    - "ioc_matching"
+    - "incident_triage"
+    - "forensic_timeline"
+    - "defensive_recommendations"
+  disallowed:
+    - "unauthorized_access"
+    - "exploit_development"
+    - "payload_generation"
+    - "persistence_mechanisms"
+    - "credential_theft"

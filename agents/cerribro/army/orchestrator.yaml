@@ -1,0 +1,23 @@
+orchestration:
+  mode: "event-driven"
+  scheduler: "priority-queue"
+  max_parallel_tasks: 200
+
+routing_rules:
+  - if: "source in ['siem','edr'] and severity >= 7"
+    route_to: ["detection-squad", "triage-squad"]
+  - if: "ioc_match == true"
+    route_to: ["intel-correlation-squad", "triage-squad"]
+  - if: "incident_confirmed == true"
+    route_to: ["forensics-squad", "remediation-squad"]
+
+human_in_loop:
+  required_for:
+    - "host_isolation"
+    - "account_disable"
+    - "firewall_block_global"
+    - "any_production_change"
+
+audit:
+  enabled: true
+  log_all_decisions: true
