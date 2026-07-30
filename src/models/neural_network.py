@@ -5,7 +5,8 @@ This module implements deep learning models using TensorFlow/Keras for training
 adaptive agents with reinforcement learning capabilities.
 """
 
-import pickle
+import os
+import threading
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
@@ -291,7 +292,39 @@ class AgentLearningModel:
 
         Returns:
             Loss value
+            
+        Raises:
+            ValueError: If input shapes are invalid or mismatched
         """
+        # FIX #2: Comprehensive input shape validation
+        batch_size = states.shape[0]
+        
+        if states.shape[1:] != (self.state_size,):
+            raise ValueError(
+                f"states shape mismatch: expected (..., {self.state_size}), "
+                f"got {states.shape}"
+            )
+        if actions.shape != (batch_size,):
+            raise ValueError(
+                f"actions batch mismatch: expected ({batch_size},), "
+                f"got {actions.shape}"
+            )
+        if rewards.shape != (batch_size,):
+            raise ValueError(
+                f"rewards batch mismatch: expected ({batch_size},), "
+                f"got {rewards.shape}"
+            )
+        if next_states.shape != states.shape:
+            raise ValueError(
+                f"next_states shape mismatch: expected {states.shape}, "
+                f"got {next_states.shape}"
+            )
+        if dones.shape != (batch_size,):
+            raise ValueError(
+                f"dones batch mismatch: expected ({batch_size},), "
+                f"got {dones.shape}"
+            )
+        
         with tf.device(self.device_name):
             states = tf.convert_to_tensor(states, dtype=tf.float32)
             actions = tf.convert_to_tensor(actions, dtype=tf.int32)
@@ -331,9 +364,14 @@ class AgentLearningModel:
             self.target_network.set_weights(self.network.get_weights())
 
     def decay_epsilon(self) -> None:
-        """Decay epsilon for exploration."""
+        """Decay epsilon for exploration with bounds checking.
+        
+        FIX #4: Ensure epsilon doesn't decay unexpectedly below minimum.
+        """
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
+            # Ensure we don't go below epsilon_min
+            self.epsilon = max(self.epsilon, self.epsilon_min)
 
     def get_model_summary(self) -> str:
         """
@@ -351,14 +389,31 @@ class AgentLearningModel:
 
         Args:
             filepath: Path to save model
+            
+        Raises:
+            IOError: If unable to write to file path
         """
+        # FIX #5: Validate directory and permissions before saving
+        dirpath = os.path.dirname(filepath)
+        if dirpath and not os.path.exists(dirpath):
+            try:
+                os.makedirs(dirpath, exist_ok=True)
+            except OSError as e:
+                raise IOError(f"Cannot create directory {dirpath}: {e}")
+        
+        if dirpath and not os.access(dirpath, os.W_OK):
+            raise IOError(f"No write permission to directory {dirpath}")
+        
         # Build model if it has not been called yet
         if not self.network.built:
             dummy = tf.zeros((1, self.state_size))
             self.network(dummy, training=False)
 
-        self.network.save_weights(filepath)
-        logger.info(f"Model saved to {filepath}")
+        try:
+            self.network.save_weights(filepath)
+            logger.info(f"Model saved to {filepath}")
+        except Exception as e:
+            raise IOError(f"Failed to save model to {filepath}: {e}")
 
     def load_model(self, filepath: str) -> None:
         """
@@ -366,25 +421,43 @@ class AgentLearningModel:
 
         Args:
             filepath: Path to load model from
+            
+        Raises:
+            FileNotFoundError: If model file does not exist
+            IOError: If unable to read or parse model file
         """
+        # FIX #5: Check file existence and readability before loading
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"Model file not found: {filepath}")
+        
+        if not os.access(filepath, os.R_OK):
+            raise IOError(f"No read permission for file {filepath}")
+        
         # Build model if it has not been called yet
         if not self.network.built:
             dummy = tf.zeros((1, self.state_size))
             self.network(dummy, training=False)
 
-        with open(filepath, "rb") as f:
-            weights = pickle.load(f)
-        self.network.set_weights(weights)
-        if self.model_type == "dqn":
-            if not self.target_network.built:
-                dummy = tf.zeros((1, self.state_size))
-                self.target_network(dummy, training=False)
-            self.target_network.set_weights(self.network.get_weights())
-        logger.info(f"Model loaded from {filepath}")
+        try:
+            # FIX #1: Replace unsafe pickle.load() with TensorFlow's safe load_weights()
+            self.network.load_weights(filepath)
+            
+            if self.model_type == "dqn":
+                if not self.target_network.built:
+                    dummy = tf.zeros((1, self.state_size))
+                    self.target_network(dummy, training=False)
+                self.target_network.set_weights(self.network.get_weights())
+            
+            logger.info(f"Model loaded from {filepath}")
+        except Exception as e:
+            raise IOError(f"Failed to load model from {filepath}: {e}")
 
 
 class ExperienceReplay:
-    """Experience replay buffer for storing and sampling agent experiences."""
+    """Experience replay buffer for storing and sampling agent experiences.
+    
+    FIX #6: Thread-safe implementation using locks for concurrent access.
+    """
 
     def __init__(self, max_size: int = 100000):
         """
@@ -396,6 +469,8 @@ class ExperienceReplay:
         self.max_size = max_size
         self.buffer = []
         self.position = 0
+        # FIX #6: Add threading lock for thread-safe operations
+        self._lock = threading.RLock()
 
     def add(
         self,
@@ -406,7 +481,7 @@ class ExperienceReplay:
         done: bool
     ) -> None:
         """
-        Add experience to buffer.
+        Add experience to buffer (thread-safe).
 
         Args:
             state: Current state
@@ -417,28 +492,41 @@ class ExperienceReplay:
         """
         experience = (state, action, reward, next_state, done)
         
-        if len(self.buffer) < self.max_size:
-            self.buffer.append(experience)
-        else:
-            self.buffer[self.position] = experience
-        
-        self.position = (self.position + 1) % self.max_size
+        # FIX #6: Acquire lock to ensure thread-safe writes
+        with self._lock:
+            if len(self.buffer) < self.max_size:
+                self.buffer.append(experience)
+            else:
+                self.buffer[self.position] = experience
+            
+            self.position = (self.position + 1) % self.max_size
 
     def sample(self, batch_size: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
-        Sample a batch of experiences.
+        Sample a batch of experiences (thread-safe).
 
         Args:
             batch_size: Size of batch to sample
 
         Returns:
             Tuple of (states, actions, rewards, next_states, dones)
+            
+        Raises:
+            ValueError: If batch_size is invalid
         """
-        if batch_size > len(self.buffer):
-            batch_size = len(self.buffer)
+        if batch_size <= 0:
+            raise ValueError(f"batch_size must be positive, got {batch_size}")
         
-        indices = np.random.choice(len(self.buffer), batch_size, replace=False)
-        experiences = [self.buffer[i] for i in indices]
+        # FIX #6: Acquire lock to ensure thread-safe reads
+        with self._lock:
+            if batch_size > len(self.buffer):
+                batch_size = len(self.buffer)
+            
+            if batch_size == 0:
+                raise ValueError("Cannot sample from empty buffer")
+            
+            indices = np.random.choice(len(self.buffer), batch_size, replace=False)
+            experiences = [self.buffer[i] for i in indices]
         
         states = np.array([e[0] for e in experiences])
         actions = np.array([e[1] for e in experiences])
@@ -449,40 +537,46 @@ class ExperienceReplay:
         return states, actions, rewards, next_states, dones
 
     def __len__(self) -> int:
-        """Get buffer size."""
-        return len(self.buffer)
+        """Get buffer size (thread-safe)."""
+        with self._lock:
+            return len(self.buffer)
 
 
 if __name__ == "__main__":
-    # Example usage
-    logger.info("Creating example agent learning model...")
-    
-    # Create model
-    model = AgentLearningModel(
-        state_size=64,
-        action_size=10,
-        learning_rate=0.001,
-        model_type="dqn",
-        device="cpu"
-    )
-    
-    # Create experience replay
-    replay = ExperienceReplay(max_size=10000)
-    
-    # Simulate some experience
-    for i in range(100):
-        state = np.random.randn(64)
-        action = model.select_action(state)
-        reward = np.random.randn()
-        next_state = np.random.randn(64)
-        done = np.random.random() > 0.9
+    # FIX #3: Add try-except error handling for demo execution
+    try:
+        logger.info("Creating example agent learning model...")
         
-        replay.add(state, action, reward, next_state, done)
-    
-    # Train on batch
-    if len(replay) > 32:
-        states, actions, rewards, next_states, dones = replay.sample(32)
-        loss = model.train_step(states, actions, rewards, next_states, dones)
-        logger.info(f"Training loss: {loss}")
-    
-    logger.info("Example training completed successfully!")
+        # Create model
+        model = AgentLearningModel(
+            state_size=64,
+            action_size=10,
+            learning_rate=0.001,
+            model_type="dqn",
+            device="cpu"
+        )
+        
+        # Create experience replay
+        replay = ExperienceReplay(max_size=10000)
+        
+        # Simulate some experience
+        for i in range(100):
+            state = np.random.randn(64)
+            action = model.select_action(state)
+            reward = np.random.randn()
+            next_state = np.random.randn(64)
+            done = np.random.random() > 0.9
+            
+            replay.add(state, action, reward, next_state, done)
+        
+        # Train on batch
+        if len(replay) > 32:
+            states, actions, rewards, next_states, dones = replay.sample(32)
+            loss = model.train_step(states, actions, rewards, next_states, dones)
+            logger.info(f"Training loss: {loss}")
+        
+        logger.info("Example training completed successfully!")
+        
+    except Exception as e:
+        logger.error(f"Demo failed with error: {e}", exc_info=True)
+        raise
