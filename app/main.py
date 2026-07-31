@@ -15,7 +15,8 @@ def _parse_csv_env(name: str, default: str = "") -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
-allowed_hosts = _parse_csv_env("APP_ALLOWED_HOSTS", "*")
+# Prefer explicit hosts; allow localhost-only fallback for development.
+allowed_hosts = _parse_csv_env("APP_ALLOWED_HOSTS", "localhost,127.0.0.1,0.0.0.0")
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
 
