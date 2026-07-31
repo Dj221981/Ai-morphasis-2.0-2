@@ -10,7 +10,10 @@
         "ms-python.vscode-pylance"
       ],
       "settings": {
-        "python.defaultInterpreterPath": "/usr/local/bin/python"
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.unittestEnabled": false,
+        "python.analysis.typeCheckingMode": "basic"
       }
     }
   },
@@ -20,5 +23,6 @@
       "label": "FastAPI app",
       "onAutoForward": "notify"
     }
-  }
+  },
+  "remoteUser": "vscode"
 }
