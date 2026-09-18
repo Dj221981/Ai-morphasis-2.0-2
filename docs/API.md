@@ -102,7 +102,7 @@ print(f"Running {config.app_name} v{config.version}")
 print(f"Using device: {config.model_device}")
 ```
 
-### `src.agents.CerribroAgent`
+### `src.agents.super_agentic_agents.CerribroAgent`
 
 Specialist agentic AI for application building, game development, and coding assistance.
 Extends `BaseAgent` with mode-based workflows and an enforced grounding policy.
