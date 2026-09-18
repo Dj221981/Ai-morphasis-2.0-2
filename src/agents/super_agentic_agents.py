@@ -206,14 +206,15 @@ class DeepStorageMemory:
         """
         with self._lock:
             if memory_type in ("auto", "working") and key in self._working:
+                self.last_accessed = datetime.now()
                 return self._working[key]
 
-        base_result = self._base.retrieve(key, memory_type)
-        if base_result is not None:
-            return base_result
+            base_result = self._base.retrieve(key, memory_type)
+            if base_result is not None:
+                self.last_accessed = datetime.now()
+                return base_result
 
         return self.retrieve_archive(key)
-
     # ------------------------------------------------------------------
     # Archive tier
     # ------------------------------------------------------------------
