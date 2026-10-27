@@ -99,6 +99,17 @@ High-impact actions should always require explicit approval:
 
 ---
 
+## Bounded Optimizer Scaffold
+
+`src.optimization.optimize` is a first-step, sequential optimizer scaffold,
+not autonomous self-modifying intelligence. It evaluates a baseline and keeps
+only valid score improvements meeting a minimum threshold without reducing
+quality. Iteration, evaluation (including baseline), stagnation, and optional
+elapsed-time budgets bound the run. Time checks cannot interrupt callbacks;
+callers must bound callback execution and avoid mutating candidate payloads.
+It does not apply changes, deploy, self-train, or update model weights.
+Deterministic tests: `python -m pytest tests/test_optimization.py -v`.
+
 ## Next Steps
 
 - Add additional playbooks (credential stuffing, insider risk, cloud misconfiguration).
